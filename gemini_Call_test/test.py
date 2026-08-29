@@ -2,6 +2,8 @@ import asyncio
 import os
 import queue
 import threading
+import time
+import audioop
 
 import sounddevice as sd
 from dotenv import load_dotenv
@@ -18,7 +20,7 @@ load_dotenv()
 API_KEY = os.getenv("GEMINI_API_KEY")
 
 if not API_KEY:
-    raise RuntimeError("GEMINI_API_KEY is missing from .env")
+    raise RuntimeError("GEMINI_API_KEY missing")
 
 MODEL = "gemini-3.1-flash-live-preview"
 
@@ -26,11 +28,14 @@ INPUT_RATE = 16000
 OUTPUT_RATE = 24000
 
 CHANNELS = 1
-BLOCK_SIZE = 1600
+BLOCK_SIZE = 1600       # 100ms
+
+VOICE_THRESHOLD = 500
+SILENCE_DURATION = 0.65
 
 
 # ============================================================
-# AUDIO
+# AUDIO QUEUES
 # ============================================================
 
 mic_queue = queue.Queue()
@@ -40,7 +45,7 @@ speaker_lock = threading.Lock()
 
 
 # ============================================================
-# MICROPHONE
+# MICROPHONE CALLBACK
 # ============================================================
 
 def microphone_callback(indata, frames, time_info, status):
@@ -52,7 +57,7 @@ def microphone_callback(indata, frames, time_info, status):
 
 
 # ============================================================
-# SPEAKER
+# SPEAKER CALLBACK
 # ============================================================
 
 def speaker_callback(outdata, frames, time_info, status):
@@ -87,7 +92,12 @@ def speaker_callback(outdata, frames, time_info, status):
 # MICROPHONE → GEMINI
 # ============================================================
 
-async def send_audio(session, sending):
+async def microphone_sender(session):
+
+    speaking = False
+    last_voice_time = 0
+
+    print("\n🎙 LISTENING...\n")
 
     while True:
 
@@ -95,7 +105,35 @@ async def send_audio(session, sending):
             mic_queue.get
         )
 
-        if sending.is_set():
+        volume = audioop.rms(
+            audio,
+            2
+        )
+
+        now = time.monotonic()
+
+        # ----------------------------------------------------
+        # SPEECH START
+        # ----------------------------------------------------
+
+        if volume > VOICE_THRESHOLD:
+
+            if not speaking:
+
+                speaking = True
+
+                print(
+                    "\n🎙 SPEECH START"
+                )
+
+            last_voice_time = now
+
+
+        # ----------------------------------------------------
+        # ONLY SEND AUDIO WHILE SPEAKING
+        # ----------------------------------------------------
+
+        if speaking:
 
             await session.send_realtime_input(
                 audio=types.Blob(
@@ -105,75 +143,121 @@ async def send_audio(session, sending):
             )
 
 
+        # ----------------------------------------------------
+        # SPEECH END
+        # ----------------------------------------------------
+
+        if speaking:
+
+            if (
+                now - last_voice_time
+                >= SILENCE_DURATION
+            ):
+
+                speaking = False
+
+                print(
+                    "\n🎙 SPEECH END"
+                )
+
+                print(
+                    "🎧 Waiting for Gemini..."
+                )
+
+                await session.send_realtime_input(
+                    audio_stream_end=True
+                )
+
+
 # ============================================================
 # GEMINI → SPEAKER
 # ============================================================
 
-async def receive_audio(session):
+async def gemini_receiver(session):
 
-    async for response in session.receive():
+    global speaker_buffer
 
-        if not response.server_content:
-            continue
+    while True:
 
-        content = response.server_content
+        async for response in session.receive():
 
+            if not response.server_content:
+                continue
 
-        # USER TRANSCRIPTION
-        if content.input_transcription:
+            content = response.server_content
 
-            text = content.input_transcription.text
+            # ------------------------------------------------
+            # USER TRANSCRIPTION
+            # ------------------------------------------------
 
-            if text:
+            if content.input_transcription:
 
-                print(f"\n🎙 YOU: {text}")
+                text = content.input_transcription.text
 
-
-        # GEMINI TRANSCRIPTION
-        if content.output_transcription:
-
-            text = content.output_transcription.text
-
-            if text:
-
-                print(f"\n🤖 MARCUS: {text}")
+                if text:
+                    print(f"\n🎙 YOU: {text}")
 
 
-        # GEMINI AUDIO
-        if content.model_turn:
+            # ------------------------------------------------
+            # GEMINI TRANSCRIPTION
+            # ------------------------------------------------
 
-            for part in content.model_turn.parts:
+            if content.output_transcription:
 
-                if (
-                    part.inline_data
-                    and part.inline_data.data
-                ):
+                text = content.output_transcription.text
 
-                    with speaker_lock:
-
-                        speaker_buffer.extend(
-                            part.inline_data.data
-                        )
+                if text:
+                    print(f"\n🤖 MARCUS: {text}")
 
 
-        # INTERRUPTION
-        if content.interrupted:
+            # ------------------------------------------------
+            # GEMINI AUDIO
+            # ------------------------------------------------
 
-            print("\n⚡ INTERRUPTED")
+            if content.model_turn:
 
-            with speaker_lock:
+                for part in content.model_turn.parts:
 
-                speaker_buffer.clear()
+                    if (
+                        part.inline_data
+                        and part.inline_data.data
+                    ):
+
+                        with speaker_lock:
+
+                            speaker_buffer.extend(
+                                part.inline_data.data
+                            )
 
 
-        # TURN COMPLETE
-        if content.turn_complete:
+            # ------------------------------------------------
+            # INTERRUPTION
+            # ------------------------------------------------
 
-            print(
-                "\n────────────────────────────"
-            )
+            if content.interrupted:
+
+                print("\n⚡ MARCUS INTERRUPTED")
+
+                with speaker_lock:
+                    speaker_buffer.clear()
 
 
+            # ------------------------------------------------
+            # TURN COMPLETE
+            # ------------------------------------------------
+
+            if content.turn_complete:
+
+                print(
+                    "\n────────────────────────────"
+                )
+
+                print(
+                    "🎙 Ready for next turn"
+                )
+
+        # session.receive() ended after turn_complete.
+        # Re-enter it for the next turn.
 # ============================================================
 # MAIN
 # ============================================================
@@ -193,27 +277,18 @@ async def main():
         "output_audio_transcription": {},
 
         "system_instruction": (
-            "You are Marcus, a friendly AI assistant. "
+            "You are Marcus. "
             "Have a natural conversation. "
-            "Keep your responses short and conversational."
+            "Keep responses short. "
+            "Do not give long speeches."
         ),
 
-        "realtime_input_config": {
-
-            "automatic_activity_detection": {
-
-                "disabled": True
-
-            }
-
-        }
     }
 
 
     print()
     print("============================================")
-    print(" GEMINI LIVE V4.1")
-    print(" MANUAL TURN TEST")
+    print("       GEMINI LIVE VOICE TEST V6")
     print("============================================")
     print()
 
@@ -229,7 +304,15 @@ async def main():
     ) as session:
 
         print("🟢 CONNECTED")
+
         print()
+        print("🎙 Microphone ON")
+        print("🔊 Speaker ON")
+        print()
+        print("Talk normally.")
+        print("Press CTRL+C to stop.")
+        print()
+        print("============================================")
 
 
         mic_stream = sd.RawInputStream(
@@ -266,80 +349,21 @@ async def main():
         speaker_stream.start()
 
 
-        # Whether microphone audio is currently
-        # being sent to Gemini.
-        sending = threading.Event()
-
-
-        # Start the continuous audio sender.
         sender_task = asyncio.create_task(
-            send_audio(
-                session,
-                sending
-            )
+            microphone_sender(session)
         )
 
-
         receiver_task = asyncio.create_task(
-            receive_audio(session)
+            gemini_receiver(session)
         )
 
 
         try:
 
-            while True:
-
-                print()
-                print("Press ENTER to start speaking.")
-
-                await asyncio.to_thread(
-                    input
-                )
-
-
-                # ------------------------------------------------
-                # START USER TURN
-                # ------------------------------------------------
-
-                print()
-                print("🎙 SPEAK NOW")
-                print("Press ENTER when finished.")
-                print()
-
-
-                await session.send_realtime_input(
-                    activity_start={}
-                )
-
-                sending.set()
-
-
-                # Wait for ENTER
-                await asyncio.to_thread(
-                    input
-                )
-
-
-                # ------------------------------------------------
-                # END USER TURN
-                # ------------------------------------------------
-
-                sending.clear()
-
-
-                await session.send_realtime_input(
-                    activity_end={}
-                )
-
-
-                print()
-                print("🎧 Waiting for Marcus...")
-
-
-        except KeyboardInterrupt:
-
-            print("\nStopping...")
-
+            await asyncio.gather(
+                sender_task,
+                receiver_task
+            )
 
         finally:
 
@@ -365,4 +389,6 @@ if __name__ == "__main__":
 
     except KeyboardInterrupt:
 
-        print("\nConversation ended.")
+        print(
+            "\n\nConversation ended."
+        )
