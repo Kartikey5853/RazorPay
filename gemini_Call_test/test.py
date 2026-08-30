@@ -28,6 +28,13 @@ if not API_KEY:
 LIVE_MODEL = "gemini-3.1-flash-live-preview"
 SUMMARY_MODEL = "gemini-3.5-flash-lite"
 
+CONFIG_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "configuration_test",
+    "agent_config.json"
+)
+
 INPUT_RATE = 16000
 OUTPUT_RATE = 24000
 
@@ -188,26 +195,32 @@ async def microphone_sender(session):
         # SPEECH END
         # ----------------------------------------------------
 
-        if speaking:
+        
 
-            if (
-                now - last_voice_time
-                >= SILENCE_DURATION
-            ):
+        if (
+            now - last_voice_time
+            >= SILENCE_DURATION
+        ):
 
-                speaking = False
+            speaking = False
 
-                print(
-                    "\n🎙 SPEECH END"
-                )
+            print(
+                "\n🎙 SPEECH END"
+            )
 
-                print(
-                    "🎧 Waiting for Gemini..."
-                )
+            print(
+                "⏳ Waiting 3 seconds before sending..."
+            )
 
-                await session.send_realtime_input(
-                    audio_stream_end=True
-                )
+            await asyncio.sleep(3)
+
+            print(
+                "🎧 Sending to Gemini..."
+            )
+
+            await session.send_realtime_input(
+                audio_stream_end=True
+            )
 
 
 # ============================================================
@@ -395,6 +408,100 @@ class CallResult(BaseModel):
 
     action: Action
 
+# ============================================================
+# Config loader
+# ============================================================
+def load_agent_config():
+
+    if not os.path.exists(CONFIG_PATH):
+
+        raise FileNotFoundError(
+            f"Agent configuration not found: {CONFIG_PATH}"
+        )
+
+    with open(
+        CONFIG_PATH,
+        "r",
+        encoding="utf-8"
+    ) as file:
+
+        return json.load(file)
+
+
+def build_agent_instructions(agent_config):
+
+    return f"""
+You are Marcus, an AI calling assistant.
+
+Follow the owner's configuration below.
+
+================ OWNER CONFIGURATION ================
+
+OBJECTIVE:
+{agent_config["objective"]}
+
+TARGET PERSON:
+{agent_config["target_person"]}
+
+REQUIRED INFORMATION:
+{json.dumps(agent_config["required_information"], indent=2)}
+
+QUALIFICATION CRITERIA:
+{json.dumps(agent_config["qualification_criteria"], indent=2)}
+
+CONVERSATION RULES:
+{json.dumps(agent_config["conversation_rules"], indent=2)}
+
+DISQUALIFICATION CONDITIONS:
+{json.dumps(agent_config["disqualification_conditions"], indent=2)}
+
+CALL END CONDITIONS:
+{json.dumps(agent_config["call_end_conditions"], indent=2)}
+
+FOLLOW-UP:
+{json.dumps(agent_config["follow_up"], indent=2)}
+
+================ BEHAVIOR ================
+
+The configuration above is the source of truth.
+
+Your job is to accomplish the objective naturally through
+conversation.
+
+Ask one question at a time.
+
+Collect the required information naturally rather than reading
+a questionnaire.
+
+If the person asks a question, answer it when the configuration
+contains enough information to answer it.
+
+If the configuration does not provide an answer, do not invent one.
+
+Never invent:
+- compensation
+- project requirements
+- company information
+- deadlines
+- promises
+- qualifications
+
+Follow the qualification criteria.
+
+Follow the disqualification conditions.
+
+Follow the call-end conditions.
+
+If the person is not a fit, politely explain the relevant reason
+when appropriate and end the call.
+
+If the person is a fit and the configuration specifies a
+follow-up, communicate that naturally.
+
+Keep responses concise and conversational.
+
+Do not discuss topics unrelated to the owner's objective.
+"""
 
 # ============================================================
 # CALL SUMMARY
@@ -618,6 +725,11 @@ async def main():
         api_key=API_KEY
     )
 
+    agent_config = load_agent_config()
+
+    agent_instructions = build_agent_instructions(
+        agent_config
+    )
 
     config = {
 
@@ -627,56 +739,7 @@ async def main():
 
         "output_audio_transcription": {},
 
-        "system_instruction": """
-You are Marcus, an AI assistant calling on behalf of an employer.
-
-IMPORTANT:
-This is a SOFTWARE ENGINEERING screening call.
-
-The employer is looking for a software engineer who can build
-websites and web applications.
-
-Your job is to learn about the candidate's technical background.
-
-Ask about:
-
-- Programming languages they use
-- Frameworks and technologies they use
-- What websites or web applications they can build
-- Their frontend/backend/full-stack experience
-- Their strongest technical skills
-- Types of software projects they enjoy
-- Their preferred type of engineering work
-- Their previous relevant projects
-- Their availability for new work
-
-Do NOT ask about politics, elections, voting, movies, acting,
-religion, personal political opinions, or unrelated personal topics.
-
-Ask ONE question at a time.
-
-Have a natural conversation rather than reading a questionnaire.
-
-If the candidate asks why you are asking a question, explain that
-you are trying to understand their technical background for the
-software engineering opportunity.
-
-If the candidate asks about the project and you don't have specific
-project information, say that you don't have those details.
-
-If the candidate asks about compensation and you don't have
-compensation information, say that you don't have it.
-
-If the candidate asks a question, answer it when possible and then
-return to the previous unanswered screening question.
-
-Never invent project details, compensation, company information,
-or requirements.
-
-You are Marcus, an AI assistant. You are NOT the employer.
-
-Keep responses concise and conversational.
-"""
+        "system_instruction": agent_instructions
 
     }
 
