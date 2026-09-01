@@ -1,11 +1,19 @@
-import React, { useState } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { NavigationDock } from '../components/NavigationDock';
 import { Logo } from '../components/Logo';
 
 export const MainLayout: React.FC = () => {
     const navigate = useNavigate();
+    const location = useLocation();
     const [dropdownOpen, setDropdownOpen] = useState(false);
+
+    useEffect(() => {
+        const token = localStorage.getItem('auth_token');
+        if (!token) {
+            navigate('/login');
+        }
+    }, [navigate, location]);
 
     const handleLogout = () => {
         localStorage.removeItem('auth_token');
@@ -17,16 +25,16 @@ export const MainLayout: React.FC = () => {
             <header className="bg-surface border-b sticky top-0" style={{ zIndex: 50 }}>
                 <div className="w-full px-4 md:px-8 h-20 flex items-center justify-between">
                     <Logo />
-                    
+
                     <div className="relative">
-                        <button 
+                        <button
                             onClick={() => setDropdownOpen(!dropdownOpen)}
                             className="w-10 h-10 rounded-full bg-slate-200 border-2 border-white shadow-sm flex items-center justify-center font-bold text-primary focus:outline-none"
                             style={{ backgroundImage: 'url(https://lh3.googleusercontent.com/aida-public/AB6AXuDd7OgtOsgV-7fT-PMAtRkZQwiy26IRY1cplWwENE5X55QdnILLHM9zFqQkADS1ou8-DipYMPul9aRMnvjk_aCr8_kJcYZhiKmBpnTrVKMGVgVlKq6Lyi5y85unkuFWVcIBGP_P9zxVk6lsP2bFGvbb04uSgMEDXt5n0AhQ5NWF9dqtitb2pTbIFv8JU7yES5ZPGfZtHDvqbll0Q-taRwPIkKycs6ZaG4UjxE-CJhNYBBSxRyS8mm_eqg)', backgroundSize: 'cover' }}
                         >
                             {/* Fallback text if no image */}
                         </button>
-                        
+
                         {dropdownOpen && (
                             <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-xl border overflow-hidden" style={{ zIndex: 60 }}>
                                 <div className="p-3 border-b bg-slate-50">
@@ -44,18 +52,18 @@ export const MainLayout: React.FC = () => {
                     </div>
                 </div>
             </header>
-            
-            <main 
-                style={{ 
-                    width: 'min(1200px, calc(100vw - 64px))', 
-                    marginLeft: 'auto', 
+
+            <main
+                style={{
+                    width: 'min(1200px, calc(100vw - 64px))',
+                    marginLeft: 'auto',
                     marginRight: 'auto',
                     paddingTop: '6rem' // 96px
                 }}
             >
                 <Outlet />
             </main>
-            
+
             <NavigationDock />
         </div>
     );
