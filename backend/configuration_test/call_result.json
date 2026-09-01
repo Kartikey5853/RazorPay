@@ -1,0 +1,27 @@
+{
+  "call_outcome": "unqualified",
+  "summary": [
+    "Candidate stated they are available for new work.",
+    "Candidate has previous experience from two internships.",
+    "Candidate has not built a complete e-commerce platform from start to finish, but has built other platforms following a sales structure.",
+    "Project budget discussed was up to 50k INR per month.",
+    "Marcus determined the candidate was not the right fit because the project requires end-to-end e-commerce experience from scratch."
+  ],
+  "information_collected": {
+    "skills": [],
+    "experience": [
+      "Completed two internships"
+    ],
+    "interests": [],
+    "availability": "Currently available for new work",
+    "compensation": "50k INR per month"
+  },
+  "questions_from_contact": [],
+  "unanswered": [],
+  "next_action": null,
+  "action": {
+    "required": false,
+    "type": null,
+    "reason": null
+  }
+}

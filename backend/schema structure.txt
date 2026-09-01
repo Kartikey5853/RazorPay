@@ -1,0 +1,430 @@
+1. users
+
+The business owner / Ergon account.
+
+users
+------
+id              UUID PK
+name            string
+email           string UNIQUE
+business_name   string
+timezone        string
+created_at      timestamp
+updated_at      timestamp
+
+If you're using an auth provider like Supabase/Auth0/etc., don't duplicate passwords here. Just reference the authenticated user's ID.
+
+2. people
+
+Everyone Ergon interacts with.
+
+people
+------
+id              UUID PK
+user_id         UUID FK → users.id
+
+name            string
+type            string
+email           string nullable
+phone           string nullable
+company         string nullable
+location        string nullable
+
+tags            JSONB / string[]
+notes           text nullable
+
+created_at      timestamp
+updated_at      timestamp
+type
+
+Don't hardcode the database around specific industries.
+
+Initially:
+
+client
+lead
+candidate
+vendor
+customer
+partner
+custom
+
+This lets:
+
+Rahul → Candidate
+
+and:
+
+Acme Technologies → Client
+
+exist in the same system.
+
+3. jobs
+
+A job = an outcome the business wants to accomplish.
+
+jobs
+----
+id                  UUID PK
+user_id             UUID FK
+
+title               string
+description         text
+
+status              string
+deadline            timestamp nullable
+budget              decimal nullable
+
+objective           text
+requirements        JSONB
+constraints         JSONB
+
+ai_plan             JSONB nullable
+current_action      text nullable
+
+created_at          timestamp
+updated_at          timestamp
+completed_at        timestamp nullable
+Status
+
+Keep this simple:
+
+draft
+active
+blocked
+completed
+archived
+
+Don't create 17 different statuses yet.
+
+4. job_people
+
+This is very important.
+
+A Job can involve many people.
+
+job_people
+----------
+id              UUID PK
+
+job_id          UUID FK → jobs.id
+person_id       UUID FK → people.id
+
+role            string nullable
+status          string nullable
+
+created_at      timestamp
+
+Example:
+
+Find Lead Actor
+
+Project X Production → client
+Rahul Sharma         → candidate
+Sarah Jenkins        → candidate
+John Doe             → candidate
+
+This is why role belongs here rather than on people.
+
+5. actions
+
+This is what Ergon is supposed to do.
+
+actions
+-------
+id                  UUID PK
+
+user_id             UUID FK
+job_id              UUID FK nullable
+person_id           UUID FK nullable
+
+type                string
+status              string
+
+title               string
+description         text nullable
+
+scheduled_at        timestamp nullable
+
+payload             JSONB
+result              JSONB nullable
+error               text nullable
+
+created_at          timestamp
+started_at          timestamp nullable
+completed_at        timestamp nullable
+Types
+call
+message
+payment
+follow_up
+task
+Status
+pending
+scheduled
+running
+completed
+failed
+cancelled
+
+This table is basically the beginning of our automation engine.
+
+6. activities
+
+This is Ergon's memory of what happened.
+
+Your Dashboard's Ergon Activity comes directly from this.
+
+activities
+----------
+id              UUID PK
+
+user_id         UUID FK
+job_id          UUID FK nullable
+person_id       UUID FK nullable
+action_id       UUID FK nullable
+
+type            string
+title           string
+description     text nullable
+
+metadata        JSONB
+
+created_at      timestamp
+
+Examples:
+
+AI_CALL_COMPLETED
+MESSAGE_SENT
+PAYMENT_RECEIVED
+PAYMENT_REQUESTED
+FOLLOW_UP_SCHEDULED
+PERSON_ADDED
+PERSON_UPDATED
+JOB_CREATED
+JOB_UPDATED
+AI_PLAN_CREATED
+ACTION_COMPLETED
+
+So:
+
+Ergon calls Rahul
+       ↓
+call completes
+       ↓
+Activity created
+       ↓
+"AI screening call completed — Rahul"
+       ↓
+Dashboard displays it
+7. conversations
+
+This gives us a proper container for communication.
+
+conversations
+-------------
+id              UUID PK
+
+user_id         UUID FK
+job_id          UUID FK nullable
+person_id       UUID FK
+
+channel         string
+status          string
+
+created_at      timestamp
+updated_at      timestamp
+Channel
+whatsapp
+sms
+email
+voice
+
+We don't need separate conversation tables for WhatsApp/email/etc.
+
+8. messages
+
+Messages inside conversations.
+
+messages
+--------
+id                  UUID PK
+
+conversation_id     UUID FK
+sender_type         string
+sender_id           UUID nullable
+
+content             text
+
+status              string
+metadata            JSONB
+
+created_at          timestamp
+sender_type
+human
+ergon
+person
+
+This allows:
+
+Rahul → "Is the role still available?"
+
+Ergon → "Yes, we'd like to..."
+
+Rahul → "I'm available in October."
+
+And later the AI can process the conversation.
+
+9. calls
+
+Voice calls get their own table because they're substantially different from messages.
+
+calls
+-----
+id                  UUID PK
+
+user_id             UUID FK
+job_id              UUID FK nullable
+person_id           UUID FK nullable
+action_id           UUID FK nullable
+
+conversation_id     UUID FK nullable
+
+provider            string
+provider_call_id    string nullable
+
+status              string
+
+started_at          timestamp nullable
+ended_at            timestamp nullable
+duration_seconds    integer nullable
+
+transcript          text nullable
+summary             text nullable
+
+extracted_data      JSONB nullable
+
+created_at          timestamp
+
+Example:
+
+status:
+scheduled
+ringing
+in_progress
+completed
+failed
+
+And:
+
+extracted_data
+{
+  "qualified": true,
+  "experience": 5,
+  "availability": "October",
+  "expected_rate": 50000
+}
+
+This is what lets a call actually change the Job/Person state.
+
+10. payments
+
+Don't make Razorpay itself the payment model.
+
+A payment is a business object.
+
+payments
+--------
+id                  UUID PK
+
+user_id             UUID FK
+job_id              UUID FK nullable
+person_id           UUID FK nullable
+action_id           UUID FK nullable
+
+amount              decimal
+currency            string
+
+status              string
+
+provider            string
+provider_payment_id string nullable
+provider_link_id    string nullable
+
+description         text nullable
+
+due_at              timestamp nullable
+paid_at             timestamp nullable
+
+metadata            JSONB
+
+created_at          timestamp
+updated_at          timestamp
+Status
+pending
+paid
+failed
+cancelled
+overdue
+
+Then Razorpay is simply:
+
+provider = "razorpay"
+11. integrations
+
+This is how we avoid hardcoding Razorpay/Twilio/etc. into the whole backend.
+
+integrations
+------------
+id                  UUID PK
+user_id             UUID FK
+
+provider            string
+type                string
+
+status              string
+
+credentials         JSONB / encrypted storage
+metadata            JSONB
+
+created_at          timestamp
+updated_at          timestamp
+
+Examples:
+
+razorpay
+twilio
+whatsapp
+gemini
+
+Important: credentials should ultimately be encrypted / stored using your secrets mechanism, not casually exposed as plaintext JSON.
+
+12. files
+
+Because your Person and Job screens already have files/information.
+
+files
+-----
+id              UUID PK
+
+user_id         UUID FK
+person_id       UUID FK nullable
+job_id          UUID FK nullable
+
+name            string
+url             string
+mime_type       string
+size            integer nullable
+
+metadata        JSONB
+
+created_at      timestamp
+
+That gives you:
+
+Rahul
+ └── Resume.pdf
+
+Find Lead Actor
+ ├── Casting Brief.pdf
+ └── Requirements.pdf

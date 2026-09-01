@@ -1,0 +1,279 @@
+User
+Person
+Job
+JobPerson
+Action
+Activity
+Conversation
+Message
+Call
+Payment
+Integration
+File
+1. User
+User
+- id
+- name
+- email
+- business_name
+- timezone
+- created_at
+- updated_at
+2. Person
+Person
+- id
+- user_id
+- name
+- type
+- email
+- phone
+- company
+- location
+- tags
+- notes
+- created_at
+- updated_at
+
+type:
+
+client
+lead
+candidate
+vendor
+customer
+partner
+custom
+3. Job
+Job
+- id
+- user_id
+- title
+- description
+- objective
+- status
+- deadline
+- budget
+- requirements
+- constraints
+- ai_plan
+- current_action
+- created_at
+- updated_at
+- completed_at
+
+Status:
+
+draft
+active
+blocked
+completed
+archived
+4. JobPerson
+
+The many-to-many relationship between Jobs and People.
+
+JobPerson
+- id
+- job_id
+- person_id
+- role
+- status
+- created_at
+
+Example:
+
+Find Lead Actor
+ ├── Project X Production → client
+ ├── Rahul Sharma → candidate
+ ├── Sarah Jenkins → candidate
+ └── John Doe → candidate
+5. Action
+
+An action that Ergon needs to perform.
+
+Action
+- id
+- user_id
+- job_id
+- person_id
+- type
+- status
+- title
+- description
+- scheduled_at
+- payload
+- result
+- error
+- created_at
+- started_at
+- completed_at
+
+Types:
+
+call
+message
+payment
+follow_up
+task
+6. Activity
+
+The historical record of what happened.
+
+Activity
+- id
+- user_id
+- job_id
+- person_id
+- action_id
+- type
+- title
+- description
+- metadata
+- created_at
+
+Examples:
+
+JOB_CREATED
+AI_PLAN_CREATED
+AI_CALL_COMPLETED
+MESSAGE_SENT
+PAYMENT_RECEIVED
+PAYMENT_REQUESTED
+FOLLOW_UP_SCHEDULED
+PERSON_ADDED
+JOB_UPDATED
+ACTION_COMPLETED
+
+This powers your Ergon Activity dashboard.
+
+7. Conversation
+
+The container for a communication thread.
+
+Conversation
+- id
+- user_id
+- job_id
+- person_id
+- channel
+- status
+- created_at
+- updated_at
+
+Channels:
+
+whatsapp
+sms
+email
+voice
+8. Message
+
+Individual messages inside a conversation.
+
+Message
+- id
+- conversation_id
+- sender_type
+- sender_id
+- content
+- status
+- metadata
+- created_at
+
+Sender:
+
+person
+ergon
+human
+9. Call
+
+A voice interaction.
+
+Call
+- id
+- user_id
+- job_id
+- person_id
+- action_id
+- conversation_id
+- provider
+- provider_call_id
+- status
+- started_at
+- ended_at
+- duration_seconds
+- transcript
+- summary
+- extracted_data
+- created_at
+
+This is where your Gemini/Twilio stuff eventually lands.
+
+10. Payment
+
+Don't make this a Razorpay-specific model.
+
+Payment
+- id
+- user_id
+- job_id
+- person_id
+- action_id
+- amount
+- currency
+- status
+- provider
+- provider_payment_id
+- provider_link_id
+- description
+- due_at
+- paid_at
+- metadata
+- created_at
+- updated_at
+
+So later:
+
+provider = razorpay
+
+but the rest of Ergon doesn't care.
+
+11. Integration
+
+External services connected to Ergon.
+
+Integration
+- id
+- user_id
+- provider
+- type
+- status
+- credentials
+- metadata
+- created_at
+- updated_at
+
+Examples:
+
+razorpay
+twilio
+whatsapp
+gemini
+
+Credentials need encrypted/secure storage in the actual implementation.
+
+12. File
+
+Files attached to People or Jobs.
+
+File
+- id
+- user_id
+- person_id
+- job_id
+- name
+- url
+- mime_type
+- size
+- metadata
+- created_at

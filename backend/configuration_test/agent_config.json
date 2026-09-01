@@ -1,0 +1,31 @@
+{
+  "objective": "Find a freelancer who can build an end-to-end e-commerce platform from scratch within a 3-month timeline and budget of up to 50k INR per month, going from source requirements to a live website.",
+  "target_person": "Freelance web developer",
+  "required_information": [
+    "What they have worked on previously",
+    "When they are free / availability"
+  ],
+  "qualification_criteria": [
+    "Able to build an e-commerce platform from scratch",
+    "Able to deliver the project end-to-end (from source requirements to a live website link)",
+    "Available for a 3-month timeline",
+    "Willing to work within the budget of up to 50k INR per month"
+  ],
+  "conversation_rules": [
+    "Pitch the freelancer project",
+    "Ask when they are free",
+    "Ask what they have worked on previously",
+    "Check if they are interested and available"
+  ],
+  "disqualification_conditions": [
+    "Rate is higher than 50k INR",
+    "Not available for the 3-month timeline"
+  ],
+  "call_end_conditions": [
+    "Candidate is not interested",
+    "Candidate does not meet the timeline or budget requirements"
+  ],
+  "follow_up": [
+    "Let the owner know if the candidate shows interest"
+  ]
+}
