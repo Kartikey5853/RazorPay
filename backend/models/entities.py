@@ -60,6 +60,35 @@ class JobPerson(Base):
     status: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
+class Task(Base):
+    __tablename__ = "tasks"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=uid)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), index=True)
+    parent_task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id"), nullable=True)
+    title: Mapped[str] = mapped_column(String)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="To Do")
+    priority: Mapped[str | None] = mapped_column(String, nullable=True)
+    sprint: Mapped[str | None] = mapped_column(String, nullable=True)
+    due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+class TaskPerson(Base):
+    __tablename__ = "task_people"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=uid)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"), index=True)
+    person_id: Mapped[str] = mapped_column(ForeignKey("people.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+class Milestone(Base):
+    __tablename__ = "milestones"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=uid)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), index=True)
+    title: Mapped[str] = mapped_column(String)
+    date: Mapped[datetime] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
 class Action(Base):
     __tablename__ = "actions"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=uid); user_id: Mapped[str] = mapped_column(ForeignKey("users.id")); job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id"), nullable=True); person_id: Mapped[str | None] = mapped_column(ForeignKey("people.id"), nullable=True)

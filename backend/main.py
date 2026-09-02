@@ -1,3 +1,5 @@
+import warnings
+warnings.filterwarnings("ignore")
 from datetime import datetime, timedelta
 from typing import Annotated
 
@@ -21,6 +23,9 @@ from models import (
     Message,
     Call,
     Payment,
+    Task,
+    TaskPerson,
+    Milestone,
 )
 from schemas import (
     PersonCreate,
@@ -33,10 +38,16 @@ from schemas import (
     MessageCreate,
     PaymentCreate,
     ProcessRequest,
+    TaskCreate,
+    TaskUpdate,
+    TaskPersonCreate,
+    MilestoneCreate,
+    MilestoneUpdate,
 )
 
 from utils import serialize, activity, owned
 from routers.auth import router as auth_router, current_user
+from routers.call_assistant import router as call_assistant_router
 
 
 # ============================================================
@@ -54,6 +65,7 @@ app = FastAPI(
     title="Ergon API",
     version="1.0.0",
 )
+app.include_router(call_assistant_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -221,14 +233,50 @@ def get_person(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ):
-    return serialize(
-        owned(
-            db,
-            Person,
-            person_id,
-            user.id,
-        )
-    )
+    item = owned(db, Person, person_id, user.id)
+    result = serialize(item)
+
+    # Jobs
+    job_links = db.scalars(select(JobPerson).where(JobPerson.person_id == person_id)).all()
+    job_ids = [link.job_id for link in job_links]
+    jobs = db.scalars(select(Job).where(Job.id.in_(job_ids))).all()
+    result["jobs"] = [serialize(job) for job in jobs]
+
+    # Tasks
+    task_links = db.scalars(select(TaskPerson).where(TaskPerson.person_id == person_id)).all()
+    task_ids = [link.task_id for link in task_links]
+    tasks = db.scalars(select(Task).where(Task.id.in_(task_ids))).all()
+    
+    tasks_data = []
+    for t in tasks:
+        td = serialize(t)
+        job = db.get(Job, t.job_id)
+        if job:
+            td["job_title"] = job.title
+        tasks_data.append(td)
+    result["tasks"] = tasks_data
+
+    # Calls
+    calls = db.scalars(select(Call).where(Call.person_id == person_id).order_by(Call.created_at.desc())).all()
+    result["calls"] = [serialize(c) for c in calls]
+
+    # Messages/Conversations
+    # Get all conversations for this person, then their messages
+    convs = db.scalars(select(Conversation).where(Conversation.person_id == person_id)).all()
+    messages = []
+    for conv in convs:
+        msgs = db.scalars(select(Message).where(Message.conversation_id == conv.id)).all()
+        messages.extend([serialize(m) for m in msgs])
+    
+    # Sort messages chronologically
+    messages.sort(key=lambda x: x["created_at"], reverse=True)
+    result["messages"] = messages
+
+    # Payments
+    payments = db.scalars(select(Payment).where(Payment.person_id == person_id).order_by(Payment.created_at.desc())).all()
+    result["payments"] = [serialize(p) for p in payments]
+
+    return result
 
 
 @app.patch("/people/{person_id}")
@@ -270,16 +318,51 @@ def delete_person(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ):
-    person = owned(
+    item = owned(
         db,
         Person,
         person_id,
         user.id,
     )
-
-    db.delete(person)
+    db.delete(item)
     db.commit()
 
+from pydantic import BaseModel
+class CallSave(BaseModel):
+    person_id: str | None = None
+    job_id: str | None = None
+    duration_seconds: int | None = None
+    transcript: str | None = None
+    summary: str | None = None
+    extracted_data: dict | None = None
+
+@app.post("/calls")
+def save_call(
+    data: CallSave,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    call = Call(
+        user_id=user.id,
+        person_id=data.person_id,
+        job_id=data.job_id,
+        status="completed",
+        duration_seconds=data.duration_seconds,
+        transcript=data.transcript,
+        summary=data.summary,
+        extracted_data=data.extracted_data,
+        ended_at=datetime.utcnow()
+    )
+    db.add(call)
+    db.commit()
+    db.refresh(call)
+    
+    if data.person_id:
+        person = db.get(Person, data.person_id)
+        if person:
+            activity(db, user.id, "CALL_LOGGED", f"Call logged with {person.name} ({data.duration_seconds}s)", person_id=person.id)
+
+    return serialize(call)
 
 @app.get("/people/{person_id}/activities")
 def person_activities(
@@ -414,6 +497,26 @@ def get_job(
         }
         for link in links
     ]
+    
+    tasks = db.scalars(select(Task).where(Task.job_id == job_id).order_by(Task.created_at.desc())).all()
+    result["tasks"] = []
+    for task in tasks:
+        task_data = serialize(task)
+        task_links = db.scalars(select(TaskPerson).where(TaskPerson.task_id == task.id)).all()
+        task_people = []
+        for tl in task_links:
+            try:
+                task_people.append(serialize(owned(db, Person, tl.person_id, user.id)))
+            except:
+                pass
+        task_data["people"] = task_people
+        result["tasks"].append(task_data)
+
+    milestones = db.scalars(select(Milestone).where(Milestone.job_id == job_id).order_by(Milestone.date.asc())).all()
+    result["milestones"] = [serialize(m) for m in milestones]
+    
+    payments = db.scalars(select(Payment).where(Payment.job_id == job_id).order_by(Payment.created_at.desc())).all()
+    result["payments"] = [serialize(p) for p in payments]
 
     return result
 
@@ -520,6 +623,131 @@ def remove_job_person(
         )
 
     db.delete(link)
+    db.commit()
+
+# ============================================================
+# TASKS & MILESTONES
+# ============================================================
+
+@app.get("/jobs/{job_id}/tasks")
+def get_tasks(
+    job_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    owned(db, Job, job_id, user.id)
+    tasks = db.scalars(select(Task).where(Task.job_id == job_id).order_by(Task.created_at.desc())).all()
+    return [serialize(t) for t in tasks]
+
+@app.post("/jobs/{job_id}/tasks", status_code=201)
+def create_task(
+    job_id: str,
+    data: TaskCreate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    owned(db, Job, job_id, user.id)
+    payload = data.model_dump()
+    person_ids = payload.pop("person_ids", [])
+    task = Task(job_id=job_id, **payload)
+    db.add(task)
+    db.flush()
+    for pid in person_ids:
+        db.add(TaskPerson(task_id=task.id, person_id=pid))
+    
+    activity(db, user.id, "TASK_CREATED", f"Task created - {task.title}", job_id=job_id)
+    db.commit()
+    db.refresh(task)
+    return serialize(task)
+
+@app.patch("/tasks/{task_id}")
+def update_task(
+    task_id: str,
+    data: TaskUpdate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    task = db.get(Task, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    owned(db, Job, task.job_id, user.id)
+    
+    payload = data.model_dump(exclude_unset=True)
+    person_ids = payload.pop("person_ids", None)
+
+    for key, value in payload.items():
+        setattr(task, key, value)
+        
+    if person_ids is not None:
+        db.query(TaskPerson).filter(TaskPerson.task_id == task_id).delete()
+        for pid in person_ids:
+            db.add(TaskPerson(task_id=task.id, person_id=pid))
+    
+    activity(db, user.id, "TASK_UPDATED", f"Task updated - {task.title}", job_id=task.job_id)
+    db.commit()
+    db.refresh(task)
+    return serialize(task)
+
+@app.delete("/tasks/{task_id}", status_code=204)
+def delete_task(
+    task_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    task = db.get(Task, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    owned(db, Job, task.job_id, user.id)
+    
+    # delete task_people as well (cascade or manual)
+    db.query(TaskPerson).filter(TaskPerson.task_id == task_id).delete()
+    db.delete(task)
+    db.commit()
+
+@app.post("/jobs/{job_id}/milestones", status_code=201)
+def create_milestone(
+    job_id: str,
+    data: MilestoneCreate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    owned(db, Job, job_id, user.id)
+    milestone = Milestone(job_id=job_id, **data.model_dump())
+    db.add(milestone)
+    db.commit()
+    db.refresh(milestone)
+    return serialize(milestone)
+
+@app.patch("/milestones/{milestone_id}")
+def update_milestone(
+    milestone_id: str,
+    data: MilestoneUpdate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    milestone = db.get(Milestone, milestone_id)
+    if not milestone:
+        raise HTTPException(status_code=404)
+    owned(db, Job, milestone.job_id, user.id)
+    
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(milestone, key, value)
+    
+    db.commit()
+    db.refresh(milestone)
+    return serialize(milestone)
+
+@app.delete("/milestones/{milestone_id}", status_code=204)
+def delete_milestone(
+    milestone_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    milestone = db.get(Milestone, milestone_id)
+    if not milestone:
+        raise HTTPException(status_code=404)
+    owned(db, Job, milestone.job_id, user.id)
+    db.delete(milestone)
     db.commit()
 
 

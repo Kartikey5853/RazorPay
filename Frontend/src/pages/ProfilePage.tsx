@@ -11,7 +11,7 @@ export const ProfilePage: React.FC = () => {
     };
 
     return (
-        <div className="w-full pb-32">
+        <div className="w-full pb-32 pt-8 flex justify-center">
             <div className="w-full max-w-2xl mx-auto">
                 <header className="mb-8 text-center md:text-left">
                     <h1 className="text-4xl font-bold tracking-tight mb-4 text-primary">Your Profile</h1>

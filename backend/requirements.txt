@@ -5,3 +5,5 @@ pydantic[email]>=2.0
 passlib[bcrypt]>=1.7
 bcrypt<5
 python-jose[cryptography]>=3.3
+google-genai>=1.0
+python-dotenv>=1.0

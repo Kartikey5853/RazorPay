@@ -10,4 +10,6 @@ from .call import Call
 from .payment import Payment
 from .integration import Integration
 from .file import File
-__all__ = ["User", "Person", "Job", "JobPerson", "Action", "Activity", "Conversation", "Message", "Call", "Payment", "Integration", "File"]
+from .task import Task, TaskPerson
+from .milestone import Milestone
+__all__ = ["User", "Person", "Job", "JobPerson", "Action", "Activity", "Conversation", "Message", "Call", "Payment", "Integration", "File", "Task", "TaskPerson", "Milestone"]
