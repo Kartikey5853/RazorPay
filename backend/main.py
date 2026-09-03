@@ -1,5 +1,3 @@
-import warnings
-warnings.filterwarnings("ignore")
 from datetime import datetime, timedelta
 from typing import Annotated
 

@@ -37,6 +37,11 @@ export const AICallPage: React.FC = () => {
     const wsRef = useRef<WebSocket | null>(null);
     const audioContextRef = useRef<AudioContext | null>(null);
     const mediaStreamRef = useRef<MediaStream | null>(null);
+    const processorRef = useRef<ScriptProcessorNode | null>(null);
+    const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+    const transcriptsRef = useRef<TranscriptItem[]>([]);
+    const durationRef = useRef(0);
+    const endingRef = useRef(false);
     
     useEffect(() => {
         if (personId) {
@@ -65,8 +70,15 @@ export const AICallPage: React.FC = () => {
         return () => clearInterval(interval);
     }, [phase, isConnected]);
 
+    useEffect(() => { transcriptsRef.current = transcripts; }, [transcripts]);
+    useEffect(() => { durationRef.current = duration; }, [duration]);
+
     const handleStartCall = async () => {
         try {
+            endingRef.current = false;
+            setDuration(0);
+            setTranscripts([]);
+            setSummaryResult(null);
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             mediaStreamRef.current = stream;
             
@@ -76,6 +88,8 @@ export const AICallPage: React.FC = () => {
             
             const source = audioCtx.createMediaStreamSource(stream);
             const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+            sourceRef.current = source;
+            processorRef.current = processor;
             
             const token = localStorage.getItem('auth_token');
             const wsUrl = `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}`.replace('http', 'ws') + `/jobs/${selectedJobId}/call-assistant/live?token=${token}`;
@@ -87,15 +101,39 @@ export const AICallPage: React.FC = () => {
                 setIsConnected(true);
                 setPhase('CALL');
                 
+                let speaking = false;
+                let silenceStartedAt = 0;
+                const VOICE_THRESHOLD = 0.012;
+                const SILENCE_MS = 650;
+                const PAUSE_GUARD_MS = 3000;
                 processor.onaudioprocess = (e) => {
                     if (ws.readyState !== WebSocket.OPEN) return;
                     const inputData = e.inputBuffer.getChannelData(0);
+                    let sum = 0;
+                    for (let i = 0; i < inputData.length; i++) sum += inputData[i] * inputData[i];
+                    const isVoice = Math.sqrt(sum / inputData.length) >= VOICE_THRESHOLD;
+                    if (!isVoice && !speaking) return;
                     const pcm16 = new Int16Array(inputData.length);
                     for (let i = 0; i < inputData.length; i++) {
                         let s = Math.max(-1, Math.min(1, inputData[i]));
                         pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
                     }
-                    ws.send(pcm16.buffer);
+                    if (isVoice) {
+                        speaking = true;
+                        silenceStartedAt = 0;
+                        ws.send(pcm16.buffer);
+                    } else {
+                        // Include the trailing silence so Gemini receives natural word endings.
+                        ws.send(pcm16.buffer);
+                        if (!silenceStartedAt) silenceStartedAt = Date.now();
+                        // 650 ms marks a possible end of speech.  Wait another 3 seconds
+                        // before committing the turn, so a person can pause naturally.
+                        if (Date.now() - silenceStartedAt >= SILENCE_MS + PAUSE_GUARD_MS) {
+                            ws.send(JSON.stringify({ type: 'audio_stream_end' }));
+                            speaking = false;
+                            silenceStartedAt = 0;
+                        }
+                    }
                 };
                 source.connect(processor);
                 processor.connect(audioCtx.destination);
@@ -110,16 +148,22 @@ export const AICallPage: React.FC = () => {
                         setTranscripts(prev => {
                             const newTranscripts = [...prev];
                             const last = newTranscripts.length > 0 ? newTranscripts[newTranscripts.length - 1] : null;
+                            const nextText = data.text.trim();
+                            if (!nextText) return prev;
                             if (last && last.speaker === data.speaker) {
-                                last.text = last.text.trim() + ' ' + data.text.trim();
+                                // Live transcription events are often cumulative; replace overlap rather than duplicate it.
+                                if (nextText.startsWith(last.text)) last.text = nextText;
+                                else if (!last.text.endsWith(nextText)) last.text = `${last.text.trim()} ${nextText}`;
                             } else {
-                                newTranscripts.push({ speaker: data.speaker, text: data.text.trim() });
+                                newTranscripts.push({ speaker: data.speaker, text: nextText });
                             }
                             return newTranscripts;
                         });
                     } else if (data.type === 'error') {
                         console.error('Call Error:', data.message);
                         handleEndCall();
+                    } else if (data.type === 'interrupted') {
+                        nextPlayTime = audioContextRef.current?.currentTime || 0;
                     }
                 } else if (e.data instanceof Blob) {
                     const buffer = await e.data.arrayBuffer();
@@ -159,6 +203,15 @@ export const AICallPage: React.FC = () => {
     };
 
     const handleEndCall = () => {
+        if (endingRef.current) return;
+        endingRef.current = true;
+        if (processorRef.current) {
+            processorRef.current.onaudioprocess = null;
+            processorRef.current.disconnect();
+            processorRef.current = null;
+        }
+        sourceRef.current?.disconnect();
+        sourceRef.current = null;
         if (wsRef.current) {
             wsRef.current.close();
             wsRef.current = null;
@@ -173,33 +226,24 @@ export const AICallPage: React.FC = () => {
         }
         setIsConnected(false);
         setPhase('SUMMARY');
-        generateSummary();
+        generateSummary(transcriptsRef.current, durationRef.current);
     };
     
-    const generateSummary = async () => {
+    const generateSummary = async (callTranscripts: TranscriptItem[], callDuration: number) => {
         setIsSaving(true);
-        // Simulate sending to backend for summary generation
-        const fullTranscript = transcripts.map(t => `${t.speaker === 'user' ? 'CANDIDATE' : 'MARCUS'}: ${t.text}`).join('\n');
-        
-        const summary = "Discussed job opportunity and collected candidate requirements.";
-        
-        const mockResult = {
-            summary: ["Candidate expressed interest", "Available immediately", "Has 5 years experience"],
-            information_collected: { skills: ["React", "Python"], experience: ["5 years"], interests: ["AI"], availability: "Immediate", compensation: "Not discussed" },
-            call_outcome: "interested",
-            next_action: "Schedule follow up interview"
-        };
+        const fullTranscript = callTranscripts.map(t => `${t.speaker === 'user' ? 'CANDIDATE' : 'MARCUS'}: ${t.text}`).join('\n');
         
         try {
+            const result = await api.post(`/jobs/${selectedJobId}/call-assistant/summary`, { transcript: fullTranscript }).then(response => response.data);
             await api.post('/calls', {
                 person_id: personId,
                 job_id: selectedJobId || undefined,
-                duration_seconds: duration,
+                duration_seconds: callDuration,
                 transcript: fullTranscript,
-                summary: summary,
-                extracted_data: mockResult
+                summary: result.summary.join(' '),
+                extracted_data: result
             });
-            setSummaryResult(mockResult);
+            setSummaryResult(result);
         } catch (err) {
             console.error(err);
         } finally {
