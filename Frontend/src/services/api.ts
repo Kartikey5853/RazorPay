@@ -9,7 +9,7 @@ export interface Person { id: string; name: string; type: string; email?: string
 export interface Task { id: string; title: string; description?: string; status: string; priority?: string; sprint?: string; due_date?: string; created_at: string; people?: Person[]; parent_task_id?: string; }
 export interface Milestone { id: string; title: string; date: string; created_at: string }
 export interface Payment { id: string; amount: number; currency: string; status: string; description?: string; created_at: string }
-export interface Job { id: string; title: string; description: string; objective: string; status: string; budget?: number; deadline?: string; requirements: any; constraints: any; ai_plan?: any; current_action?: string; created_at: string; people?: Person[]; tasks?: Task[]; milestones?: Milestone[]; payments?: Payment[] }
+export interface Job { id: string; title: string; description: string; objective: string; status: string; budget?: number; deadline?: string; requirements: any; constraints: any; ai_plan?: any; current_action?: string; created_at: string; people?: Person[]; tasks?: Task[]; milestones?: Milestone[]; payments?: Payment[]; calls?: any[] }
 export interface Activity { id: string; type: string; title: string; description?: string; created_at: string }
 export interface CallAssistantConfig { objective: string; target_person: string; required_information: string[]; qualification_criteria: string[]; conversation_rules: string[]; disqualification_conditions: string[]; call_end_conditions: string[]; follow_up: string[] }
 export type PersonInput = Omit<Person, 'id' | 'created_at' | 'updated_at'>;

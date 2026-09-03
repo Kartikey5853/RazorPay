@@ -59,3 +59,13 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
     token = jwt.encode({"sub": user.id, "exp": datetime.utcnow() + timedelta(days=7)}, SECRET, algorithm=ALGORITHM)
     return {"access_token": token, "token_type": "bearer", "user": serialize(user)}
+
+async def get_current_user_ws(token: str, db: Session):
+    try:
+        user_id = jwt.decode(token, SECRET, algorithms=[ALGORITHM])["sub"]
+    except (JWTError, KeyError):
+        raise Exception("Invalid authentication token")
+    user = db.get(User, user_id)
+    if not user:
+        raise Exception("User not found")
+    return user

@@ -48,6 +48,7 @@ from schemas import (
 from utils import serialize, activity, owned
 from routers.auth import router as auth_router, current_user
 from routers.call_assistant import router as call_assistant_router
+from routers.live_call import router as live_call_router
 
 
 # ============================================================
@@ -66,6 +67,7 @@ app = FastAPI(
     version="1.0.0",
 )
 app.include_router(call_assistant_router)
+app.include_router(live_call_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -360,7 +362,7 @@ def save_call(
     if data.person_id:
         person = db.get(Person, data.person_id)
         if person:
-            activity(db, user.id, "CALL_LOGGED", f"Call logged with {person.name} ({data.duration_seconds}s)", person_id=person.id)
+            activity(db, user.id, "AI_CALL_COMPLETED", f"AI Call Completed — {person.name} ({data.duration_seconds}s)", person_id=person.id, job_id=data.job_id)
 
     return serialize(call)
 

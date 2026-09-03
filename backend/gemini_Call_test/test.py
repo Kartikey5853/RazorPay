@@ -17,7 +17,8 @@ from typing import List, Optional
 # ============================================================
 # CONFIG
 # ============================================================
-
+THRESHOLD = 500
+SILENCE_DURATION = 0.65
 load_dotenv()
 
 API_KEY = os.getenv("GEMINI_API_KEY")
@@ -140,88 +141,69 @@ def get_transcript():
 # ============================================================
 
 async def microphone_sender(session):
+    print("🎙 Microphone ON")
 
     speaking = False
-    last_voice_time = 0
-
-    print("\n🎙 LISTENING...\n")
+    silence_start = None
 
     while True:
+        data = await asyncio.to_thread(mic_queue.get)
 
-        audio = await asyncio.to_thread(
-            mic_queue.get
-        )
+        rms = audioop.rms(data, 2)
 
-        volume = audioop.rms(
-            audio,
-            2
-        )
-
-        now = time.monotonic()
-
-
-        # ----------------------------------------------------
-        # SPEECH START
-        # ----------------------------------------------------
-
-        if volume > VOICE_THRESHOLD:
+        # -----------------------------------------
+        # SPEECH DETECTED
+        # -----------------------------------------
+        if rms > THRESHOLD:
 
             if not speaking:
-
                 speaking = True
+                silence_start = None
+                print("\n🎙 SPEAKING...")
 
-                print(
-                    "\n🎙 SPEECH START"
-                )
-
-            last_voice_time = now
-
-
-        # ----------------------------------------------------
-        # SEND ONLY WHILE SPEAKING
-        # ----------------------------------------------------
-
-        if speaking:
+            silence_start = None
 
             await session.send_realtime_input(
                 audio=types.Blob(
-                    data=audio,
-                    mime_type="audio/pcm;rate=16000",
+                    data=data,
+                    mime_type="audio/pcm;rate=16000"
                 )
             )
 
+        # -----------------------------------------
+        # SILENCE WHILE SPEAKING
+        # -----------------------------------------
+        elif speaking:
 
-        # ----------------------------------------------------
-        # SPEECH END
-        # ----------------------------------------------------
+            if silence_start is None:
+                silence_start = time.time()
 
-        
+            silence_duration = time.time() - silence_start
 
-        if (
-            now - last_voice_time
-            >= SILENCE_DURATION
-        ):
+            # User has stopped speaking
+            if silence_duration >= SILENCE_DURATION:
 
-            speaking = False
+                print("\n🎙 SPEECH END")
+                print("⏳ Waiting 3 seconds before sending...")
 
-            print(
-                "\n🎙 SPEECH END"
-            )
+                await asyncio.sleep(3)
 
-            print(
-                "⏳ Waiting 3 seconds before sending..."
-            )
+                print("🎧 Sending to Gemini...")
 
-            await asyncio.sleep(3)
+                await session.send_realtime_input(
+                    audio_stream_end=True
+                )
 
-            print(
-                "🎧 Sending to Gemini..."
-            )
+                # IMPORTANT:
+                # We are now waiting for the NEXT utterance.
+                speaking = False
+                silence_start = None
 
-            await session.send_realtime_input(
-                audio_stream_end=True
-            )
-
+        # -----------------------------------------
+        # OTHERWISE: KEEP WAITING
+        # -----------------------------------------
+        else:
+            continue
 
 # ============================================================
 # GEMINI → SPEAKER + TRANSCRIPT

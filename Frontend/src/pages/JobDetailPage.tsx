@@ -531,6 +531,32 @@ export const JobDetailPage: React.FC = () => {
                             )}
                         </div>
 
+                        {/* AI CALLS */}
+                        <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-sm max-h-[300px] overflow-y-auto">
+                            <h2 className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-4">AI Calls</h2>
+                            {(!job.calls || job.calls.length === 0) ? (
+                                <p className="text-xs text-on-surface-variant italic">No AI calls recorded yet.</p>
+                            ) : (
+                                <div className="space-y-4">
+                                    {job.calls.map(call => (
+                                        <div key={call.id} className="border-b border-slate-100 pb-3 last:border-0 last:pb-0">
+                                            <div className="flex justify-between items-start mb-1">
+                                                <p className="text-xs font-bold text-primary">Call</p>
+                                                <span className="text-[9px] text-on-surface-variant font-mono">{new Date(call.created_at).toLocaleString()}</span>
+                                            </div>
+                                            <p className="text-[10px] text-on-surface-variant mb-2">Duration: {call.duration_seconds}s</p>
+                                            <p className="text-xs text-primary leading-relaxed">{call.summary}</p>
+                                            {call.extracted_data && call.extracted_data.call_outcome && (
+                                                <span className="inline-block mt-2 px-2 py-0.5 bg-indigo-50 text-secondary font-bold text-[9px] rounded uppercase tracking-widest">
+                                                    {call.extracted_data.call_outcome}
+                                                </span>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
                         {/* ACTIVITY */}
                         <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-sm max-h-[300px] overflow-y-auto">
                             <h2 className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-4">Activity</h2>
