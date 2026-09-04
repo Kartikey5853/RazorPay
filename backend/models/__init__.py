@@ -12,4 +12,5 @@ from .integration import Integration
 from .file import File
 from .task import Task, TaskPerson
 from .milestone import Milestone
-__all__ = ["User", "Person", "Job", "JobPerson", "Action", "Activity", "Conversation", "Message", "Call", "Payment", "Integration", "File", "Task", "TaskPerson", "Milestone"]
+from .calendar_event import CalendarEvent
+__all__ = ["User", "Person", "Job", "JobPerson", "Action", "Activity", "Conversation", "Message", "Call", "Payment", "Integration", "File", "Task", "TaskPerson", "Milestone", "CalendarEvent"]

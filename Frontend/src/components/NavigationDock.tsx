@@ -10,6 +10,7 @@ export const NavigationDock: React.FC = () => {
         { path: "/dashboard", icon: "dashboard", label: "Dashboard" },
         { path: "/people", icon: "group", label: "People" },
         { path: "/jobs", icon: "work", label: "Jobs" },
+        { path: "/calendar", icon: "calendar_month", label: "Calendar" },
         { path: "/settings", icon: "settings", label: "Settings" },
     ];
 

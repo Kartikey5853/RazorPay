@@ -118,3 +118,21 @@ class Integration(Base):
 class File(Base):
     __tablename__ = "files"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=uid); user_id: Mapped[str] = mapped_column(ForeignKey("users.id")); person_id: Mapped[str | None] = mapped_column(ForeignKey("people.id"), nullable=True); job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id"), nullable=True); name: Mapped[str] = mapped_column(String); url: Mapped[str] = mapped_column(String); mime_type: Mapped[str] = mapped_column(String); size: Mapped[int | None] = mapped_column(Integer, nullable=True); metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict); created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+class CalendarEvent(Base):
+    __tablename__ = "calendar_events"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    title: Mapped[str] = mapped_column(String)
+    event_type: Mapped[str] = mapped_column(String)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    start_at: Mapped[datetime] = mapped_column(DateTime)
+    end_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="scheduled")
+    person_id: Mapped[str | None] = mapped_column(ForeignKey("people.id"), nullable=True)
+    job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id"), nullable=True)
+    amount: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    currency: Mapped[str | None] = mapped_column(String, default="INR", nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

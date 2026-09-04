@@ -1,9 +1,18 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BentoGrid, BentoCard } from '../components/ui/bento-grid';
+import { CalendarService, type CalendarEvent } from '../services/api';
 
 export const Dashboard: React.FC = () => {
     const navigate = useNavigate();
+    const [todayEvents, setTodayEvents] = useState<CalendarEvent[]>([]);
+
+    useEffect(() => {
+        const todayStr = new Date().toISOString().slice(0, 10);
+        CalendarService.getAll().then(events => {
+            setTodayEvents(events.filter(e => e.start_at.startsWith(todayStr)));
+        });
+    }, []);
     
     return (
         <div className="w-full pb-32">
@@ -49,11 +58,31 @@ export const Dashboard: React.FC = () => {
                 <BentoCard
                     name="Today"
                     Icon="today"
-                    className="lg:col-span-1"
+                    className="lg:col-span-1 overflow-y-auto custom-scrollbar"
                     background={<div className="absolute inset-0 bg-gradient-to-t from-slate-50/50 to-transparent pointer-events-none" />}
-                    description="View upcoming scheduled AI calls, meetings, and follow-ups for the day."
+                    description={
+                        <div className="flex flex-col gap-2 mt-2 w-full pr-2">
+                            {todayEvents.length > 0 ? todayEvents.map(evt => (
+                                <div key={evt.id} onClick={(e) => { e.preventDefault(); navigate('/calendar'); }} className="bg-white/80 p-2 rounded border border-slate-200 text-slate-800 text-xs shadow-sm cursor-pointer hover:bg-white transition-colors">
+                                    <div className="flex justify-between items-start font-bold mb-1">
+                                        <span className="truncate">{evt.title}</span>
+                                        <span className="text-[10px] text-slate-500">{new Date(evt.start_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                    </div>
+                                    <div className="flex flex-col gap-0.5 text-[10px] text-slate-600">
+                                        {evt.event_type.toLowerCase().includes('payment') && evt.amount ? (
+                                            <span className="text-green-700 font-medium">Due: {evt.currency === 'INR' ? '₹' : evt.currency}{evt.amount.toLocaleString()}</span>
+                                        ) : null}
+                                        {evt.person_name && <span>— {evt.person_name}</span>}
+                                        {evt.job_title && <span>{evt.job_title}</span>}
+                                    </div>
+                                </div>
+                            )) : (
+                                "No events scheduled for today."
+                            )}
+                        </div>
+                    }
                     cta="View Schedule"
-                    href="/dashboard"
+                    href="/calendar"
                 />
 
                 {/* 4. ERGON ACTIVITY */}

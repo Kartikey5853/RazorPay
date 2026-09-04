@@ -41,4 +41,16 @@ export const JobsService = {
 export const DashboardService = { summary:()=>api.get<{active_jobs:number;people:number;pending_actions:number;activities:Activity[]}>('/dashboard/summary').then(r=>r.data) };
 export const ActionService = { call:(data:{person_id?:string;job_id?:string})=>api.post('/calls',data).then(r=>r.data), message:(data:{person_id:string;job_id?:string;content:string;channel?:string})=>api.post('/messages',data).then(r=>r.data), payment:(data:{amount:number;person_id?:string;job_id?:string;currency?:string;description?:string})=>api.post('/payments',data).then(r=>r.data) };
 export const SettingsService = { get:()=>api.get<User>('/settings').then(r=>r.data), update:(data:Partial<User>)=>api.patch<User>('/settings',data).then(r=>r.data) };
+
+export interface CalendarEvent { id: string; title: string; event_type: string; description?: string; start_at: string; end_at?: string; status: string; person_id?: string; job_id?: string; amount?: number; currency?: string; created_at: string; updated_at: string; completed_at?: string; person_name?: string; job_title?: string; }
+export type CalendarEventInput = Omit<CalendarEvent, 'id' | 'created_at' | 'updated_at' | 'completed_at' | 'person_name' | 'job_title'>;
+
+export const CalendarService = {
+  getAll: (params?: {start?:string;end?:string;person_id?:string;job_id?:string;event_type?:string;status?:string}) => api.get<CalendarEvent[]>('/calendar/events', {params}).then(r=>r.data),
+  getById: (id: string) => api.get<CalendarEvent>(`/calendar/events/${id}`).then(r=>r.data),
+  create: (data: CalendarEventInput) => api.post<CalendarEvent>('/calendar/events', data).then(r=>r.data),
+  update: (id: string, data: Partial<CalendarEventInput>) => api.patch<CalendarEvent>(`/calendar/events/${id}`, data).then(r=>r.data),
+  remove: (id: string) => api.delete(`/calendar/events/${id}`)
+};
+
 export default api;

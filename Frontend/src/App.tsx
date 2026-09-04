@@ -15,6 +15,7 @@ import { PersonProfilePage } from './pages/PersonProfilePage';
 import { AddPersonPage } from './pages/AddPersonPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { SettingsPage } from './pages/SettingsPage';
+import { CalendarPage } from './pages/CalendarPage';
 
 const App: React.FC = () => {
     return (
@@ -37,6 +38,7 @@ const App: React.FC = () => {
                     <Route path="/create-job" element={<CreateJobPage />} />
                     <Route path="/person-profile" element={<PersonProfilePage />} />
                     <Route path="/person/:id" element={<PersonProfilePage />} />
+                    <Route path="/calendar" element={<CalendarPage />} />
                     <Route path="/profile" element={<ProfilePage />} />
                     <Route path="/settings" element={<SettingsPage />} />
                 </Route>

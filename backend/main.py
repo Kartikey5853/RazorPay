@@ -24,6 +24,7 @@ from models import (
     Task,
     TaskPerson,
     Milestone,
+    CalendarEvent,
 )
 from schemas import (
     PersonCreate,
@@ -41,6 +42,8 @@ from schemas import (
     TaskPersonCreate,
     MilestoneCreate,
     MilestoneUpdate,
+    CalendarEventCreate,
+    CalendarEventUpdate,
 )
 
 from utils import serialize, activity, owned
@@ -1228,3 +1231,149 @@ def update_settings(
         "business_name": user.business_name,
         "timezone": user.timezone,
     }
+
+
+# ============================================================
+# CALENDAR
+# ============================================================
+
+@app.get("/calendar/events")
+def list_calendar_events(
+    start: str | None = None,
+    end: str | None = None,
+    person_id: str | None = None,
+    job_id: str | None = None,
+    event_type: str | None = None,
+    status: str | None = None,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    query = select(CalendarEvent).where(CalendarEvent.user_id == user.id)
+
+    if start:
+        query = query.where(CalendarEvent.start_at >= datetime.fromisoformat(start))
+    
+    if end:
+        query = query.where(CalendarEvent.start_at <= datetime.fromisoformat(end))
+
+    if person_id:
+        query = query.where(CalendarEvent.person_id == person_id)
+
+    if job_id:
+        query = query.where(CalendarEvent.job_id == job_id)
+
+    if event_type:
+        query = query.where(CalendarEvent.event_type == event_type)
+
+    if status:
+        query = query.where(CalendarEvent.status == status)
+
+    events = db.scalars(query.order_by(CalendarEvent.start_at.asc())).all()
+
+    result = []
+    for event in events:
+        event_dict = serialize(event)
+        
+        if event.person_id:
+            person = db.get(Person, event.person_id)
+            if person:
+                event_dict["person_name"] = person.name
+        
+        if event.job_id:
+            job = db.get(Job, event.job_id)
+            if job:
+                event_dict["job_title"] = job.title
+                
+        result.append(event_dict)
+
+    return result
+
+@app.post("/calendar/events", status_code=201)
+def create_calendar_event(
+    data: CalendarEventCreate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    item = CalendarEvent(
+        user_id=user.id,
+        **data.model_dump(exclude_unset=True)
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    
+    event_dict = serialize(item)
+    if item.person_id:
+        person = db.get(Person, item.person_id)
+        if person:
+            event_dict["person_name"] = person.name
+    
+    if item.job_id:
+        job = db.get(Job, item.job_id)
+        if job:
+            event_dict["job_title"] = job.title
+
+    return event_dict
+
+@app.get("/calendar/events/{event_id}")
+def get_calendar_event(
+    event_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    item = owned(db, CalendarEvent, event_id, user.id)
+    event_dict = serialize(item)
+    
+    if item.person_id:
+        person = db.get(Person, item.person_id)
+        if person:
+            event_dict["person_name"] = person.name
+    
+    if item.job_id:
+        job = db.get(Job, item.job_id)
+        if job:
+            event_dict["job_title"] = job.title
+            
+    return event_dict
+
+@app.patch("/calendar/events/{event_id}")
+def update_calendar_event(
+    event_id: str,
+    data: CalendarEventUpdate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    item = owned(db, CalendarEvent, event_id, user.id)
+
+    payload = data.model_dump(exclude_unset=True)
+    for key, value in payload.items():
+        setattr(item, key, value)
+        
+    if "status" in payload and payload["status"] == "completed" and not item.completed_at:
+        item.completed_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(item)
+    
+    event_dict = serialize(item)
+    if item.person_id:
+        person = db.get(Person, item.person_id)
+        if person:
+            event_dict["person_name"] = person.name
+    
+    if item.job_id:
+        job = db.get(Job, item.job_id)
+        if job:
+            event_dict["job_title"] = job.title
+            
+    return event_dict
+
+@app.delete("/calendar/events/{event_id}", status_code=204)
+def delete_calendar_event(
+    event_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    item = owned(db, CalendarEvent, event_id, user.id)
+    db.delete(item)
+    db.commit()
