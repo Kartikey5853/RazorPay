@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { CalendarService, PeopleService, JobsService, type CalendarEvent, type Person, type Job, type CalendarEventInput } from '../services/api';
+import { CalendarService, PeopleService, JobsService, PaymentService, type CalendarEvent, type Person, type Job, type CalendarEventInput } from '../services/api';
 
 const EVENT_TYPES = [
     'Payment Due',
@@ -275,7 +275,11 @@ const EventDetailsModal: React.FC<{event: CalendarEvent, onClose: ()=>void, onUp
     const handleComplete = async () => {
         setLoading(true);
         try {
-            await CalendarService.update(event.id, { status: 'completed' });
+            if (event.payment_id) {
+                await PaymentService.update(event.payment_id, { status: 'paid' });
+            } else {
+                await CalendarService.update(event.id, { status: 'completed' });
+            }
             onUpdated();
         } finally { setLoading(false); }
     };
@@ -283,7 +287,11 @@ const EventDetailsModal: React.FC<{event: CalendarEvent, onClose: ()=>void, onUp
     const handleCancel = async () => {
         setLoading(true);
         try {
-            await CalendarService.update(event.id, { status: 'cancelled' });
+            if (event.payment_id) {
+                await PaymentService.update(event.payment_id, { status: 'cancelled' });
+            } else {
+                await CalendarService.update(event.id, { status: 'cancelled' });
+            }
             onUpdated();
         } finally { setLoading(false); }
     };
@@ -341,14 +349,18 @@ const EventDetailsModal: React.FC<{event: CalendarEvent, onClose: ()=>void, onUp
                 </div>
 
                 <div className="flex justify-end gap-3 pt-4 border-t">
-                    {event.status === 'scheduled' && (
+                    {event.status === 'scheduled' && event.payment_id ? (
+                        <div className="text-xs text-slate-500 italic mr-auto mt-2">
+                            * Payment status is managed via Razorpay webhooks.
+                        </div>
+                    ) : event.status === 'scheduled' ? (
                         <>
                             <button onClick={handleCancel} disabled={loading} className="px-4 py-2 rounded-lg font-bold text-slate-500 hover:bg-slate-100 transition-colors">Cancel Event</button>
                             <button onClick={handleComplete} disabled={loading} className="px-6 py-2 rounded-lg font-bold text-white bg-green-600 hover:bg-green-700 shadow-sm flex items-center gap-2 transition-colors">
                                 <span className="material-symbols-outlined text-sm block">check</span> Mark Complete
                             </button>
                         </>
-                    )}
+                    ) : null}
                 </div>
             </div>
         </div>

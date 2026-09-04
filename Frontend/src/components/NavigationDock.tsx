@@ -11,6 +11,7 @@ export const NavigationDock: React.FC = () => {
         { path: "/people", icon: "group", label: "People" },
         { path: "/jobs", icon: "work", label: "Jobs" },
         { path: "/calendar", icon: "calendar_month", label: "Calendar" },
+        { path: "/razorpay", icon: "payments", label: "Razorpay" },
         { path: "/settings", icon: "settings", label: "Settings" },
     ];
 

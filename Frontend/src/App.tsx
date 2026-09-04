@@ -16,6 +16,7 @@ import { AddPersonPage } from './pages/AddPersonPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { SettingsPage } from './pages/SettingsPage';
 import { CalendarPage } from './pages/CalendarPage';
+import { RazorpayAuditPage } from './pages/RazorpayAuditPage';
 
 const App: React.FC = () => {
     return (
@@ -39,6 +40,7 @@ const App: React.FC = () => {
                     <Route path="/person-profile" element={<PersonProfilePage />} />
                     <Route path="/person/:id" element={<PersonProfilePage />} />
                     <Route path="/calendar" element={<CalendarPage />} />
+                    <Route path="/razorpay" element={<RazorpayAuditPage />} />
                     <Route path="/profile" element={<ProfilePage />} />
                     <Route path="/settings" element={<SettingsPage />} />
                 </Route>

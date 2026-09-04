@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { JobsService, PeopleService, errorMessage, type Job, type Task, type Activity, type Person, type CallAssistantConfig } from '../services/api';
+import { JobsService, PeopleService, PaymentService, errorMessage, type Job, type Task, type Activity, type Person, type CallAssistantConfig, type PaymentInput } from '../services/api';
 
 export const JobDetailPage: React.FC = () => {
     const navigate = useNavigate();
@@ -45,6 +45,9 @@ export const JobDetailPage: React.FC = () => {
 
     // Confirm Modal State
     const [confirmAction, setConfirmAction] = useState<{ message: string, action: () => Promise<void> } | null>(null);
+
+    const [showPaymentForm, setShowPaymentForm] = useState(false);
+    const [paymentData, setPaymentData] = useState<Partial<PaymentInput>>({ amount: 0, currency: 'INR', status: 'requested', title: '' });
 
     const loadData = () => {
         if (!id) return;
@@ -126,6 +129,23 @@ export const JobDetailPage: React.FC = () => {
             loadData();
         } catch (err) { console.error(err); }
     };
+
+    const handleCreatePayment = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!job || !paymentData.title || !paymentData.amount) return;
+        try {
+            await PaymentService.create({
+                ...paymentData as PaymentInput,
+                job_id: job.id,
+                person_id: job.people && job.people.length > 0 ? job.people[0].id : undefined
+            });
+            setShowPaymentForm(false);
+            setPaymentData({ amount: 0, currency: 'INR', status: 'requested', title: '' });
+            loadData();
+        } catch (err) { console.error(err); }
+    };
+
+
 
     const openPersonModal = (target: 'job' | 'task') => {
         setTargetTypeForPerson(target);
@@ -254,6 +274,7 @@ export const JobDetailPage: React.FC = () => {
     const milestones = job.milestones || [];
     const people = job.people || [];
     const payments = job.payments || [];
+    const calendar_events = job.calendar_events || [];
     const callConfig = (job.ai_plan as { call_assistant_config?: CallAssistantConfig } | undefined)?.call_assistant_config;
 
     const completedTasks = topLevelTasks.filter(t => t.status === 'Done').length;
@@ -512,19 +533,86 @@ export const JobDetailPage: React.FC = () => {
                             )}
                         </div>
 
+                        {/* UPCOMING */}
+                        <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-sm">
+                            <h2 className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-3">Upcoming</h2>
+                            {calendar_events.length === 0 ? (
+                                <p className="text-xs text-on-surface-variant italic">No upcoming events.</p>
+                            ) : (
+                                <div className="space-y-3">
+                                    {calendar_events.filter(e => e.status !== 'cancelled').map(ce => (
+                                        <div key={ce.id} className="flex justify-between items-center border-b pb-2 last:border-0 last:pb-0 cursor-pointer hover:bg-slate-50" onClick={() => navigate('/calendar')}>
+                                            <div>
+                                                <p className={`text-xs font-bold ${ce.status === 'completed' ? 'text-on-surface-variant line-through' : 'text-primary'}`}>{ce.title}</p>
+                                                <p className="text-[10px] text-on-surface-variant flex items-center gap-1 mt-0.5">
+                                                    <span className="material-symbols-outlined text-[10px]">event</span>
+                                                    {new Date(ce.start_at).toLocaleDateString()}
+                                                </p>
+                                            </div>
+                                            <span className="text-[9px] uppercase tracking-wider font-bold text-secondary bg-indigo-50 px-1.5 py-0.5 rounded">{ce.event_type}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
                         {/* PAYMENTS */}
                         <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-sm">
-                            <h2 className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-3">Payments</h2>
+                            <div className="flex justify-between items-center mb-3">
+                                <h2 className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Payments</h2>
+                                <button onClick={() => setShowPaymentForm(!showPaymentForm)} className="text-secondary hover:bg-indigo-50 rounded px-1 transition-colors">
+                                    <span className="material-symbols-outlined text-[16px]">add</span>
+                                </button>
+                            </div>
+
+                            {showPaymentForm && (
+                                <form onSubmit={handleCreatePayment} className="mb-3 bg-slate-50 border rounded p-2 text-xs flex flex-col gap-2">
+                                    <input type="text" placeholder="Title (e.g. Initial Payment)" value={paymentData.title || ''} onChange={e => setPaymentData({...paymentData, title: e.target.value})} className="border p-1 rounded" required />
+                                    <textarea placeholder="Description (e.g. Website Development Advance)" value={paymentData.description || ''} onChange={e => setPaymentData({...paymentData, description: e.target.value})} className="border p-1 rounded" rows={2}></textarea>
+                                    <div className="flex gap-2">
+                                        <input type="number" placeholder="Amount" value={paymentData.amount || ''} onChange={e => setPaymentData({...paymentData, amount: parseFloat(e.target.value)})} className="border p-1 rounded flex-1" required />
+                                        <select value={paymentData.currency} onChange={e => setPaymentData({...paymentData, currency: e.target.value})} className="border p-1 rounded bg-white">
+                                            <option value="INR">INR</option>
+                                            <option value="USD">USD</option>
+                                        </select>
+                                    </div>
+                                    <input type="date" value={paymentData.due_at ? paymentData.due_at.slice(0,10) : ''} onChange={e => setPaymentData({...paymentData, due_at: new Date(e.target.value).toISOString()})} className="border p-1 rounded" required />
+                                    <div className="flex gap-2">
+                                        <button type="submit" className="bg-primary text-white px-2 py-1 rounded text-[10px]">Create Payment Link</button>
+                                        <button type="button" onClick={() => setShowPaymentForm(false)} className="bg-white border px-2 py-1 rounded text-[10px]">Cancel</button>
+                                    </div>
+                                </form>
+                            )}
+
                             {payments.length === 0 ? (
                                 <p className="text-xs text-on-surface-variant italic">No payments yet.</p>
                             ) : (
                                 <div className="space-y-3">
                                     {payments.map(p => (
-                                        <div key={p.id} className="flex justify-between items-center border-b pb-2 last:border-0 last:pb-0">
-                                            <div>
-                                                <p className="text-xs font-bold text-primary">{p.currency} {p.amount.toLocaleString()}</p>
-                                                <p className="text-[10px] text-on-surface-variant uppercase">{p.status}</p>
+                                        <div key={p.id} className="flex flex-col border-b pb-3 last:border-0 last:pb-0">
+                                            <div className="flex justify-between items-start mb-2">
+                                                <div>
+                                                    <p className="text-xs font-bold text-primary">{p.title || 'Payment'}</p>
+                                                    <p className="text-[10px] text-on-surface-variant font-medium mt-0.5">{p.currency} {p.amount.toLocaleString()}</p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className={`text-[10px] uppercase font-bold tracking-wider ${p.status === 'paid' ? 'text-green-600' : p.status === 'overdue' ? 'text-error' : 'text-slate-500'}`}>{p.status}</p>
+                                                    {p.status === 'paid' && p.paid_at && <p className="text-[9px] text-on-surface-variant mt-0.5">Paid {new Date(p.paid_at).toLocaleDateString()}</p>}
+                                                    {p.status !== 'paid' && p.due_at && <p className="text-[9px] text-on-surface-variant mt-0.5">Due {new Date(p.due_at).toLocaleDateString()}</p>}
+                                                </div>
                                             </div>
+                                            {(p.status === 'requested' || p.status === 'pending' || p.status === 'overdue') && p.metadata?.payment_link_url && (
+                                                <div className="flex gap-2">
+                                                    <button onClick={() => window.open(p.metadata.payment_link_url, '_blank')} className="btn btn-outline text-[10px] py-1 px-2 border-secondary text-secondary">Open Payment</button>
+                                                    <button onClick={() => { navigator.clipboard.writeText(p.metadata.payment_link_url); alert('Payment link copied.'); }} className="btn btn-outline text-[10px] py-1 px-2 text-slate-500 border-slate-300">Copy Link</button>
+                                                    <button onClick={async () => {
+                                                        if (window.confirm('Cancel this payment request?')) {
+                                                            await PaymentService.update(p.id, { status: 'cancelled' });
+                                                            loadData();
+                                                        }
+                                                    }} className="btn btn-outline text-[10px] py-1 px-2 text-error border-error">Cancel</button>
+                                                </div>
+                                            )}
                                         </div>
                                     ))}
                                 </div>

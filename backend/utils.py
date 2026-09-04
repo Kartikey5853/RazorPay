@@ -3,11 +3,16 @@ from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
 from models import Activity
 
+from sqlalchemy.orm import class_mapper
+
 def serialize(obj):
-    data = {
-        column.name: getattr(obj, column.name)
-        for column in obj.__table__.columns
-    }
+    data = {}
+    for prop in class_mapper(obj.__class__).column_attrs:
+        data[prop.key] = getattr(obj, prop.key)
+        
+    if "metadata_" in data:
+        data["metadata"] = data.pop("metadata_")
+        
     data.pop("password_hash", None)
     for key, value in list(data.items()):
         if isinstance(value, datetime):

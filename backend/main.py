@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Annotated
 
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import jwt, JWTError
@@ -36,7 +36,9 @@ from schemas import (
     CallCreate,
     MessageCreate,
     PaymentCreate,
+    PaymentUpdate,
     ProcessRequest,
+    PaymentVerifyRequest,
     TaskCreate,
     TaskUpdate,
     TaskPersonCreate,
@@ -50,6 +52,8 @@ from utils import serialize, activity, owned
 from routers.auth import router as auth_router, current_user
 from routers.call_assistant import router as call_assistant_router
 from routers.live_call import router as live_call_router
+from services import razorpay_service
+from models.entities import uid
 
 
 # ============================================================
@@ -278,6 +282,10 @@ def get_person(
     # Payments
     payments = db.scalars(select(Payment).where(Payment.person_id == person_id).order_by(Payment.created_at.desc())).all()
     result["payments"] = [serialize(p) for p in payments]
+
+    # Calendar Events
+    calendar_events = db.scalars(select(CalendarEvent).where(CalendarEvent.person_id == person_id).order_by(CalendarEvent.start_at.asc())).all()
+    result["calendar_events"] = [serialize(ce) for ce in calendar_events]
 
     return result
 
@@ -520,6 +528,12 @@ def get_job(
     
     payments = db.scalars(select(Payment).where(Payment.job_id == job_id).order_by(Payment.created_at.desc())).all()
     result["payments"] = [serialize(p) for p in payments]
+
+    calls = db.scalars(select(Call).where(Call.job_id == job_id).order_by(Call.created_at.desc())).all()
+    result["calls"] = [serialize(c) for c in calls]
+    
+    calendar_events = db.scalars(select(CalendarEvent).where(CalendarEvent.job_id == job_id).order_by(CalendarEvent.start_at.asc())).all()
+    result["calendar_events"] = [serialize(ce) for ce in calendar_events]
 
     return result
 
@@ -1082,72 +1096,6 @@ def create_message(
 
 
 # ============================================================
-# PAYMENTS
-# ============================================================
-
-@app.post("/payments", status_code=201)
-def create_payment(
-    data: PaymentCreate,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-):
-    if data.person_id:
-        owned(
-            db,
-            Person,
-            data.person_id,
-            user.id,
-        )
-
-    if data.job_id:
-        owned(
-            db,
-            Job,
-            data.job_id,
-            user.id,
-        )
-
-    item = Payment(
-        user_id=user.id,
-        **data.model_dump(),
-    )
-
-    db.add(item)
-    db.flush()
-
-    activity(
-        db,
-        user.id,
-        "PAYMENT_REQUESTED",
-        "Payment requested",
-        data.description,
-        job_id=data.job_id,
-        person_id=data.person_id,
-    )
-
-    db.commit()
-    db.refresh(item)
-
-    return serialize(item)
-
-
-@app.get("/payments/{payment_id}")
-def get_payment(
-    payment_id: str,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-):
-    return serialize(
-        owned(
-            db,
-            Payment,
-            payment_id,
-            user.id,
-        )
-    )
-
-
-# ============================================================
 # GENERIC ACTIONS
 # ============================================================
 
@@ -1377,3 +1325,397 @@ def delete_calendar_event(
     item = owned(db, CalendarEvent, event_id, user.id)
     db.delete(item)
     db.commit()
+
+# ==========================================
+# PAYMENTS
+# ==========================================
+
+@app.get("/payments")
+def get_payments(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+    job_id: str | None = None,
+    person_id: str | None = None,
+    status: str | None = None
+):
+    query = select(Payment).where(Payment.user_id == user.id)
+    if job_id: query = query.where(Payment.job_id == job_id)
+    if person_id: query = query.where(Payment.person_id == person_id)
+    if status: query = query.where(Payment.status == status)
+    
+    payments = db.execute(query.order_by(Payment.due_at.asc())).scalars().all()
+    results = []
+    for p in payments:
+        p_dict = serialize(p)
+        if p.person_id:
+            person = db.execute(select(Person).where(Person.id == p.person_id)).scalar_one_or_none()
+            if person: p_dict['person_name'] = person.name
+        if p.job_id:
+            job = db.execute(select(Job).where(Job.id == p.job_id)).scalar_one_or_none()
+            if job: p_dict['job_title'] = job.title
+        results.append(p_dict)
+    return results
+
+@app.get("/payments/{payment_id}")
+def get_payment(payment_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    payment = owned(db, Payment, payment_id, user.id)
+    p_dict = serialize(payment)
+    if payment.person_id:
+        person = db.execute(select(Person).where(Person.id == payment.person_id)).scalar_one_or_none()
+        if person: p_dict['person_name'] = person.name
+    if payment.job_id:
+        job = db.execute(select(Job).where(Job.id == payment.job_id)).scalar_one_or_none()
+        if job: p_dict['job_title'] = job.title
+    return p_dict
+
+@app.post("/payments")
+def create_payment(
+    data: PaymentCreate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    payment_id = uid()
+
+    person = owned(db, Person, data.person_id, user.id) if data.person_id else None
+    if data.job_id:
+        owned(db, Job, data.job_id, user.id)
+    
+    razorpay_link_id = None
+    razorpay_url = None
+    
+    if not razorpay_service.is_configured():
+        raise HTTPException(status_code=500, detail="Razorpay integration is not configured on the backend.")
+
+    customer = {}
+    if person:
+        customer["name"] = person.name
+        if person.email:
+            customer["email"] = person.email
+        if person.phone:
+            customer["contact"] = person.phone
+            
+    expire_by = None
+    if data.due_at:
+        expire_by = int(data.due_at.timestamp())
+        
+    try:
+        link = razorpay_service.create_payment_link(
+            amount=data.amount,
+            currency=data.currency or "INR",
+            reference_id=payment_id,
+            description=data.description or data.title,
+            customer=customer,
+            expire_by=expire_by
+        )
+        razorpay_link_id = link.get("id")
+        razorpay_url = link.get("short_url")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to create Razorpay link: {str(e)}")
+
+    payment = Payment(
+        id=payment_id,
+        user_id=user.id,
+        title=data.title,
+        amount=data.amount,
+        currency=data.currency or "INR",
+        description=data.description,
+        due_at=data.due_at,
+        status="requested",
+        person_id=data.person_id,
+        job_id=data.job_id,
+        provider="razorpay",
+        provider_link_id=razorpay_link_id,
+        metadata_={"payment_link_url": razorpay_url}
+    )
+    
+    db.add(payment)
+    db.commit()
+    db.refresh(payment)
+    
+    if payment.due_at:
+        cal_event = CalendarEvent(
+            user_id=user.id,
+            title=payment.title,
+            event_type="Payment Due",
+            start_at=payment.due_at,
+            amount=payment.amount,
+            currency=payment.currency,
+            person_id=payment.person_id,
+            job_id=payment.job_id,
+            payment_id=payment.id
+        )
+        db.add(cal_event)
+        
+    person_name_display = person.name if person else "Unknown"
+    activity(db, user.id, "payment_created", f"Payment request created for {person_name_display} — {payment.currency} {payment.amount}", job_id=payment.job_id, person_id=payment.person_id)
+    db.commit()
+    return serialize(payment)
+
+@app.post("/payments/{payment_id}/create-link")
+def create_missing_payment_link(
+    payment_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Create a Razorpay link for legacy payments that were saved without one."""
+    payment = owned(db, Payment, payment_id, user.id)
+    if payment.status in ["paid", "cancelled", "expired"]:
+        raise HTTPException(status_code=400, detail=f"Cannot create a link for a {payment.status} payment.")
+
+    metadata = dict(payment.metadata_ or {})
+    if metadata.get("payment_link_url"):
+        return serialize(payment)
+    if not razorpay_service.is_configured():
+        raise HTTPException(status_code=500, detail="Razorpay integration is not configured on the backend.")
+
+    person = owned(db, Person, payment.person_id, user.id) if payment.person_id else None
+    customer = {}
+    if person:
+        customer["name"] = person.name
+        if person.email:
+            customer["email"] = person.email
+        if person.phone:
+            customer["contact"] = person.phone
+
+    try:
+        link = razorpay_service.create_payment_link(
+            amount=float(payment.amount),
+            currency=payment.currency or "INR",
+            reference_id=payment.id,
+            description=payment.description or payment.title,
+            customer=customer,
+            expire_by=int(payment.due_at.timestamp()) if payment.due_at else None,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to create Razorpay link: {exc}")
+
+    payment.provider = "razorpay"
+    payment.provider_link_id = link.get("id")
+    payment.status = "requested"
+    metadata["payment_link_url"] = link.get("short_url")
+    payment.metadata_ = metadata
+    db.commit()
+    db.refresh(payment)
+    return serialize(payment)
+
+@app.patch("/payments/{payment_id}")
+def update_payment(
+    payment_id: str,
+    data: PaymentUpdate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    payment = owned(db, Payment, payment_id, user.id)
+    update_data = data.dict(exclude_unset=True)
+    
+    status_changed = "status" in update_data and update_data["status"] != payment.status
+    due_at_changed = "due_at" in update_data and update_data["due_at"] != payment.due_at
+    
+    if status_changed and update_data["status"] == "cancelled" and payment.provider_link_id and payment.provider == "razorpay":
+        try:
+            if razorpay_service.is_configured():
+                razorpay_service.cancel_payment_link(payment.provider_link_id)
+        except Exception as e:
+            print(f"Failed to cancel Razorpay link: {e}")
+            
+    for key, val in update_data.items():
+        setattr(payment, key, val)
+        
+    if payment.status == "paid" and not payment.paid_at:
+        payment.paid_at = datetime.utcnow()
+        activity(db, user.id, "payment_paid", f"Payment marked as paid: {payment.title}", job_id=payment.job_id, person_id=payment.person_id)
+        
+    db.commit()
+    
+    # Handle calendar event updates
+    cal_event = db.execute(select(CalendarEvent).where(CalendarEvent.payment_id == payment.id)).scalar_one_or_none()
+    if cal_event:
+        if status_changed and payment.status == "paid":
+            cal_event.status = "completed"
+            cal_event.completed_at = datetime.utcnow()
+        elif status_changed and payment.status == "cancelled":
+            cal_event.status = "cancelled"
+        if due_at_changed and payment.due_at:
+            cal_event.start_at = payment.due_at
+        cal_event.amount = payment.amount
+        cal_event.currency = payment.currency
+        cal_event.title = payment.title
+    elif payment.due_at and payment.status != "cancelled":
+        cal_event = CalendarEvent(
+            user_id=user.id,
+            title=payment.title,
+            event_type="Payment Due",
+            start_at=payment.due_at,
+            amount=payment.amount,
+            currency=payment.currency,
+            person_id=payment.person_id,
+            job_id=payment.job_id,
+            payment_id=payment.id
+        )
+        db.add(cal_event)
+        
+    db.commit()
+    return serialize(payment)
+
+@app.delete("/payments/{payment_id}", status_code=204)
+def delete_payment(
+    payment_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    payment = owned(db, Payment, payment_id, user.id)
+    cal_event = db.execute(select(CalendarEvent).where(CalendarEvent.payment_id == payment.id)).scalar_one_or_none()
+    if cal_event:
+        db.delete(cal_event)
+        
+    if payment.provider_link_id and payment.provider == "razorpay" and payment.status not in ["paid", "cancelled", "expired"]:
+        try:
+            if razorpay_service.is_configured():
+                razorpay_service.cancel_payment_link(payment.provider_link_id)
+        except Exception as e:
+            pass
+            
+    db.delete(payment)
+    db.commit()
+
+@app.post("/payments/{payment_id}/create-order")
+def create_payment_order(
+    payment_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    payment = owned(db, Payment, payment_id, user.id)
+    if payment.status in ["paid", "cancelled", "expired"]:
+        raise HTTPException(status_code=400, detail=f"Cannot create order for payment in status {payment.status}")
+        
+    try:
+        order = razorpay_service.create_order(
+            amount=payment.amount,
+            currency=payment.currency or "INR",
+            receipt=f"receipt_{payment.id}"
+        )
+        payment.provider_link_id = order.get("id") # we use provider_link_id to store order_id in this case
+        payment.provider = "razorpay"
+        db.commit()
+        return {"order_id": order.get("id"), "amount": order.get("amount"), "currency": order.get("currency")}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/payments/{payment_id}/verify-signature")
+def verify_payment_signature_endpoint(
+    payment_id: str,
+    data: PaymentVerifyRequest,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    payment = owned(db, Payment, payment_id, user.id)
+    
+    try:
+        razorpay_service.verify_payment_signature(
+            data.razorpay_order_id,
+            data.razorpay_payment_id,
+            data.razorpay_signature
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+        
+    payment.status = "paid"
+    payment.paid_at = datetime.utcnow()
+    payment.provider_payment_id = data.razorpay_payment_id
+    
+    cal_event = db.execute(select(CalendarEvent).where(CalendarEvent.payment_id == payment.id)).scalar_one_or_none()
+    if cal_event:
+        cal_event.status = "completed"
+        cal_event.completed_at = datetime.utcnow()
+        
+    person_name = "Unknown"
+    if payment.person_id:
+        person = db.get(Person, payment.person_id)
+        if person:
+            person_name = person.name
+            
+    activity(db, payment.user_id, "payment_paid", f"{person_name} paid {payment.currency} {payment.amount}", job_id=payment.job_id, person_id=payment.person_id)
+    db.commit()
+    
+    return {"status": "success"}
+
+@app.post("/webhooks/razorpay")
+async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
+    body = await request.body()
+    signature = request.headers.get("x-razorpay-signature", "")
+    
+    try:
+        razorpay_service.verify_webhook_signature(body, signature)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Invalid signature")
+        
+    payload = await request.json()
+    event = payload.get("event")
+    
+    if event in ["payment_link.paid", "payment_link.partially_paid", "payment_link.cancelled", "payment_link.expired"]:
+        p_link = payload["payload"]["payment_link"]["entity"]
+        reference_id = p_link.get("reference_id", "")
+        
+        if reference_id:
+            payment_id = reference_id.replace("ERGON-PAY-", "")
+            payment = db.get(Payment, payment_id)
+            if not payment:
+                print(f"[RAZORPAY WEBHOOK] ergon_payment_id = {payment_id} | payment_found = False")
+                return {"status": "ok"}
+                
+            print(f"[RAZORPAY WEBHOOK]")
+            print(f"event = {event}")
+            print(f"reference_id = {reference_id}")
+            print(f"razorpay_payment_link_id = {p_link.get('id')}")
+            print(f"ergon_payment_id = {payment_id}")
+            print(f"payment_found = True")
+ 
+                
+            old_status = payment.status
+            new_status = None
+            
+            if event == "payment_link.paid":
+                new_status = "paid"
+                # Store order_id if available
+                payment.provider_payment_id = p_link.get("order_id")
+            elif event == "payment_link.partially_paid":
+                new_status = "partially_paid"
+            elif event == "payment_link.cancelled":
+                new_status = "cancelled"
+            elif event == "payment_link.expired":
+                new_status = "expired"
+                
+            print(f"status_before = {old_status}")
+            print(f"status_after = {new_status or old_status}")
+            
+            if new_status and old_status != new_status:
+                payment.status = new_status
+                if new_status == "paid":
+                    payment.paid_at = datetime.utcnow()
+                    
+                cal_event = db.execute(select(CalendarEvent).where(CalendarEvent.payment_id == payment.id)).scalar_one_or_none()
+                if cal_event:
+                    if new_status == "paid":
+                        cal_event.status = "completed"
+                        cal_event.completed_at = datetime.utcnow()
+                    elif new_status == "cancelled":
+                        cal_event.status = "cancelled"
+                
+                person_name = "Unknown"
+                if payment.person_id:
+                    person = db.get(Person, payment.person_id)
+                    if person:
+                        person_name = person.name
+                        
+                action_text = f"Payment marked as {new_status}"
+                if new_status == "paid":
+                    action_text = f"{person_name} paid {payment.currency} {payment.amount}"
+                elif new_status == "expired":
+                    action_text = f"Payment request for {person_name} expired"
+                elif new_status == "cancelled":
+                    action_text = f"Payment request for {person_name} cancelled"
+                
+                activity(db, payment.user_id, f"payment_{new_status}", action_text, job_id=payment.job_id, person_id=payment.person_id)
+                db.commit()
+                
+    return {"status": "ok"}

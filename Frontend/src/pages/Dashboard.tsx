@@ -1,17 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BentoGrid, BentoCard } from '../components/ui/bento-grid';
-import { CalendarService, type CalendarEvent } from '../services/api';
+import { CalendarService, PaymentService, type CalendarEvent, type Payment } from '../services/api';
 
 export const Dashboard: React.FC = () => {
     const navigate = useNavigate();
     const [todayEvents, setTodayEvents] = useState<CalendarEvent[]>([]);
+    const [overduePayments, setOverduePayments] = useState<Payment[]>([]);
 
     useEffect(() => {
         const todayStr = new Date().toISOString().slice(0, 10);
         CalendarService.getAll().then(events => {
             setTodayEvents(events.filter(e => e.start_at.startsWith(todayStr)));
         });
+        PaymentService.getAll({ status: 'overdue' }).then(setOverduePayments);
     }, []);
     
     return (
@@ -36,11 +38,29 @@ export const Dashboard: React.FC = () => {
                 <BentoCard
                     name="Needs Attention"
                     Icon="warning"
-                    className="lg:col-span-2"
+                    className="lg:col-span-2 overflow-y-auto custom-scrollbar"
                     background={<div className="absolute inset-0 bg-gradient-to-br from-error/5 to-transparent pointer-events-none" />}
-                    description="Review and resolve 4 pending issues requiring human intervention, including overdue payments and awaiting responses."
-                    cta="View Alerts"
-                    href="/dashboard"
+                    description={
+                        <div className="flex flex-col gap-2 mt-2 w-full pr-2">
+                            {overduePayments.length > 0 ? overduePayments.map(p => (
+                                <div key={p.id} onClick={(e) => { e.preventDefault(); if(p.job_id) navigate(`/job-detail/${p.job_id}`); else if(p.person_id) navigate(`/person/${p.person_id}`); }} className="bg-white/80 p-2 rounded border border-red-200 text-slate-800 text-xs shadow-sm cursor-pointer hover:bg-white transition-colors">
+                                    <div className="flex justify-between items-start font-bold mb-1">
+                                        <span className="truncate text-error">Overdue Payment</span>
+                                        <span className="text-[10px] text-slate-500">{p.due_at ? new Date(p.due_at).toLocaleDateString() : ''}</span>
+                                    </div>
+                                    <div className="flex flex-col gap-0.5 text-[10px] text-slate-600">
+                                        <span className="font-medium">{p.currency} {p.amount.toLocaleString()} for {p.title}</span>
+                                        {p.person_name && <span>Client: {p.person_name}</span>}
+                                        {p.job_title && <span>Job: {p.job_title}</span>}
+                                    </div>
+                                </div>
+                            )) : (
+                                "No pending issues requiring human intervention at this time."
+                            )}
+                        </div>
+                    }
+                    cta="View Details"
+                    href="#"
                 />
 
                 {/* 2. ACTIVE JOBS */}

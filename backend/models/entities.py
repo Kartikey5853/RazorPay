@@ -111,7 +111,24 @@ class Call(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=uid); user_id: Mapped[str] = mapped_column(ForeignKey("users.id")); job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id"), nullable=True); person_id: Mapped[str | None] = mapped_column(ForeignKey("people.id"), nullable=True); action_id: Mapped[str | None] = mapped_column(ForeignKey("actions.id"), nullable=True); conversation_id: Mapped[str | None] = mapped_column(ForeignKey("conversations.id"), nullable=True); provider: Mapped[str] = mapped_column(String, default="manual"); provider_call_id: Mapped[str | None] = mapped_column(String, nullable=True); status: Mapped[str] = mapped_column(String, default="scheduled"); started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True); ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True); duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True); transcript: Mapped[str | None] = mapped_column(Text, nullable=True); summary: Mapped[str | None] = mapped_column(Text, nullable=True); extracted_data: Mapped[dict | None] = mapped_column(JSON, nullable=True); created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 class Payment(Base):
     __tablename__ = "payments"
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=uid); user_id: Mapped[str] = mapped_column(ForeignKey("users.id")); job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id"), nullable=True); person_id: Mapped[str | None] = mapped_column(ForeignKey("people.id"), nullable=True); action_id: Mapped[str | None] = mapped_column(ForeignKey("actions.id"), nullable=True); amount: Mapped[float] = mapped_column(Numeric); currency: Mapped[str] = mapped_column(String, default="INR"); status: Mapped[str] = mapped_column(String, default="pending"); provider: Mapped[str] = mapped_column(String, default="manual"); provider_payment_id: Mapped[str | None] = mapped_column(String, nullable=True); provider_link_id: Mapped[str | None] = mapped_column(String, nullable=True); description: Mapped[str | None] = mapped_column(Text, nullable=True); due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True); paid_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True); metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict); created_at: Mapped[datetime] = mapped_column(DateTime, default=now); updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id"), nullable=True)
+    person_id: Mapped[str | None] = mapped_column(ForeignKey("people.id"), nullable=True)
+    action_id: Mapped[str | None] = mapped_column(ForeignKey("actions.id"), nullable=True)
+    title: Mapped[str] = mapped_column(String)
+    amount: Mapped[float] = mapped_column(Numeric)
+    currency: Mapped[str] = mapped_column(String, default="INR")
+    status: Mapped[str] = mapped_column(String, default="pending")
+    provider: Mapped[str] = mapped_column(String, default="manual")
+    provider_payment_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    provider_link_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
 class Integration(Base):
     __tablename__ = "integrations"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=uid); user_id: Mapped[str] = mapped_column(ForeignKey("users.id")); provider: Mapped[str] = mapped_column(String); type: Mapped[str] = mapped_column(String); status: Mapped[str] = mapped_column(String, default="disconnected"); credentials: Mapped[dict] = mapped_column(JSON, default=dict); metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict); created_at: Mapped[datetime] = mapped_column(DateTime, default=now); updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
@@ -131,6 +148,7 @@ class CalendarEvent(Base):
     status: Mapped[str] = mapped_column(String, default="scheduled")
     person_id: Mapped[str | None] = mapped_column(ForeignKey("people.id"), nullable=True)
     job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id"), nullable=True)
+    payment_id: Mapped[str | None] = mapped_column(ForeignKey("payments.id"), nullable=True)
     amount: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     currency: Mapped[str | None] = mapped_column(String, default="INR", nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)

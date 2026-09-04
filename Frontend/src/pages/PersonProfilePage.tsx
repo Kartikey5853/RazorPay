@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { PeopleService, JobsService, type Person, type Job, type Task, type Activity } from '../services/api';
+import { PeopleService, JobsService, PaymentService, type Person, type Job, type Task, type Activity, type PaymentInput } from '../services/api';
 
 export const PersonProfilePage: React.FC = () => {
     const navigate = useNavigate();
@@ -21,6 +21,10 @@ export const PersonProfilePage: React.FC = () => {
     // Editing Notes
     const [isEditingNotes, setIsEditingNotes] = useState(false);
     const [notesInput, setNotesInput] = useState('');
+
+    // Payment State
+    const [showPaymentForm, setShowPaymentForm] = useState(false);
+    const [paymentData, setPaymentData] = useState<Partial<PaymentInput>>({ amount: 0, currency: 'INR', status: 'requested', title: '' });
 
     const loadData = async () => {
         if (!id) {
@@ -58,6 +62,20 @@ export const PersonProfilePage: React.FC = () => {
         } catch (err) {
             console.error(err);
         }
+    };
+
+    const handleCreatePayment = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!person || !paymentData.title || !paymentData.amount) return;
+        try {
+            await PaymentService.create({
+                ...paymentData as PaymentInput,
+                person_id: person.id
+            });
+            setShowPaymentForm(false);
+            setPaymentData({ amount: 0, currency: 'INR', status: 'requested', title: '' });
+            loadData();
+        } catch (err) { console.error(err); }
     };
 
     const openAssignModal = async () => {
@@ -132,6 +150,8 @@ export const PersonProfilePage: React.FC = () => {
         }
     };
 
+
+
     if (loading) {
         return <div className="p-8 text-center text-on-surface-variant font-medium">Loading person profile...</div>;
     }
@@ -147,6 +167,7 @@ export const PersonProfilePage: React.FC = () => {
     const assignedTasks = person.tasks || [];
     const commHistory = [...(person.calls || []), ...(person.messages || [])].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     const payments = person.payments || [];
+    const calendar_events = person.calendar_events || [];
 
     return (
         <div className="w-full pb-24">
@@ -277,28 +298,89 @@ export const PersonProfilePage: React.FC = () => {
                         </div>
                     </section>
 
-                    {/* PAYMENTS */}
+                    {/* UPCOMING */}
                     <section className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden flex flex-col">
                         <div className="p-5 border-b border-slate-100 bg-slate-50/50">
-                            <h2 className="text-sm font-bold text-primary tracking-tight">Payments</h2>
+                            <h2 className="text-sm font-bold text-primary tracking-tight">Upcoming</h2>
                         </div>
                         <div className="p-5">
+                            {calendar_events.length === 0 ? (
+                                <p className="text-sm text-on-surface-variant italic text-center py-4">No upcoming events.</p>
+                            ) : (
+                                <div className="space-y-3">
+                                    {calendar_events.filter(e => e.status !== 'cancelled').map(ce => (
+                                        <div key={ce.id} className="flex justify-between items-center p-3 border border-slate-100 rounded-md hover:bg-slate-50 cursor-pointer" onClick={() => navigate('/calendar')}>
+                                            <div>
+                                                <p className={`text-sm font-bold ${ce.status === 'completed' ? 'text-on-surface-variant line-through' : 'text-primary'}`}>{ce.title}</p>
+                                                <p className="text-[10px] font-medium text-on-surface-variant mt-0.5">{new Date(ce.start_at).toLocaleDateString()}</p>
+                                            </div>
+                                            <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded bg-indigo-50 text-secondary">{ce.event_type}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </section>
+
+                    {/* PAYMENTS */}
+                    <section className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden flex flex-col">
+                        <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+                            <h2 className="text-sm font-bold text-primary tracking-tight">Payments</h2>
+                            <button onClick={() => setShowPaymentForm(!showPaymentForm)} className="text-secondary hover:bg-indigo-50 rounded px-1 transition-colors">
+                                <span className="material-symbols-outlined text-[16px]">add</span>
+                            </button>
+                        </div>
+                        <div className="p-5">
+                            {showPaymentForm && (
+                                <form onSubmit={handleCreatePayment} className="mb-4 bg-slate-50 border rounded p-3 text-xs flex flex-col gap-3">
+                                    <input type="text" placeholder="Title (e.g. Initial Payment)" value={paymentData.title || ''} onChange={e => setPaymentData({...paymentData, title: e.target.value})} className="border p-2 rounded" required />
+                                    <textarea placeholder="Description (e.g. Website Development Advance)" value={paymentData.description || ''} onChange={e => setPaymentData({...paymentData, description: e.target.value})} className="border p-2 rounded" rows={2}></textarea>
+                                    <div className="flex gap-2">
+                                        <input type="number" placeholder="Amount" value={paymentData.amount || ''} onChange={e => setPaymentData({...paymentData, amount: parseFloat(e.target.value)})} className="border p-2 rounded flex-1" required />
+                                        <select value={paymentData.currency} onChange={e => setPaymentData({...paymentData, currency: e.target.value})} className="border p-2 rounded bg-white">
+                                            <option value="INR">INR</option>
+                                            <option value="USD">USD</option>
+                                        </select>
+                                    </div>
+                                    <input type="date" value={paymentData.due_at ? paymentData.due_at.slice(0,10) : ''} onChange={e => setPaymentData({...paymentData, due_at: new Date(e.target.value).toISOString()})} className="border p-2 rounded" required />
+                                    <div className="flex gap-2">
+                                        <button type="submit" className="bg-primary text-white px-3 py-1.5 rounded font-medium">Create Payment Link</button>
+                                        <button type="button" onClick={() => setShowPaymentForm(false)} className="bg-white border px-3 py-1.5 rounded font-medium">Cancel</button>
+                                    </div>
+                                </form>
+                            )}
+
                             {payments.length === 0 ? (
                                 <p className="text-sm text-on-surface-variant italic text-center py-4">No payment records found.</p>
                             ) : (
                                 <div className="space-y-3">
                                     {payments.map(p => (
-                                        <div key={p.id} className="flex justify-between items-center p-3 border border-slate-100 rounded-md hover:bg-slate-50">
-                                            <div>
-                                                <p className="text-sm font-bold text-primary">{p.currency} {p.amount.toLocaleString()}</p>
-                                                <p className="text-xs text-on-surface-variant">{p.description || 'Payment'}</p>
+                                        <div key={p.id} className="flex flex-col p-3 border border-slate-100 rounded-md hover:bg-slate-50">
+                                            <div className="flex justify-between items-start mb-2">
+                                                <div>
+                                                    <p className="text-sm font-bold text-primary">{p.title || 'Payment'}</p>
+                                                    <p className="text-xs text-on-surface-variant font-medium mt-0.5">{p.currency} {p.amount.toLocaleString()}</p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded ${p.status === 'completed' || p.status === 'paid' ? 'bg-green-100 text-green-700' : p.status === 'overdue' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                                                        {p.status}
+                                                    </span>
+                                                    {p.status === 'paid' && p.paid_at && <p className="text-[10px] text-on-surface-variant mt-1">Paid {new Date(p.paid_at).toLocaleDateString()}</p>}
+                                                    {p.status !== 'paid' && p.due_at && <p className="text-[10px] text-on-surface-variant mt-1">Due {new Date(p.due_at).toLocaleDateString()}</p>}
+                                                </div>
                                             </div>
-                                            <div className="text-right">
-                                                <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded ${p.status === 'completed' || p.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                                                    {p.status}
-                                                </span>
-                                                <p className="text-[10px] text-on-surface-variant mt-1">{new Date(p.created_at).toLocaleDateString()}</p>
-                                            </div>
+                                            {(p.status === 'requested' || p.status === 'pending' || p.status === 'overdue') && p.metadata?.payment_link_url && (
+                                                <div className="flex gap-2 mt-1">
+                                                    <button onClick={() => window.open(p.metadata.payment_link_url, '_blank')} className="btn btn-outline text-[10px] py-1 px-2 border-secondary text-secondary">Open Payment</button>
+                                                    <button onClick={() => { navigator.clipboard.writeText(p.metadata.payment_link_url); alert('Payment link copied.'); }} className="btn btn-outline text-[10px] py-1 px-2 text-slate-500 border-slate-300">Copy Link</button>
+                                                    <button onClick={async () => {
+                                                        if (window.confirm('Cancel this payment request?')) {
+                                                            await PaymentService.update(p.id, { status: 'cancelled' });
+                                                            loadData();
+                                                        }
+                                                    }} className="btn btn-outline text-[10px] py-1 px-2 text-error border-error">Cancel</button>
+                                                </div>
+                                            )}
                                         </div>
                                     ))}
                                 </div>
