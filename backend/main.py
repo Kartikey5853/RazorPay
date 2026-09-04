@@ -52,6 +52,7 @@ from utils import serialize, activity, owned
 from routers.auth import router as auth_router, current_user
 from routers.call_assistant import router as call_assistant_router
 from routers.live_call import router as live_call_router
+from routers.marcus import router as marcus_router
 from services import razorpay_service
 from models.entities import uid
 
@@ -73,6 +74,7 @@ app = FastAPI(
 )
 app.include_router(call_assistant_router)
 app.include_router(live_call_router)
+app.include_router(marcus_router)
 
 app.add_middleware(
     CORSMiddleware,

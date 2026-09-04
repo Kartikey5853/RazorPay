@@ -65,4 +65,10 @@ export const PaymentService = {
   verifySignature: (id: string, data: {razorpay_payment_id: string, razorpay_order_id: string, razorpay_signature: string}) => api.post(`/payments/${id}/verify-signature`, data).then(r=>r.data)
 };
 
+export type MarcusIntent = 'create_person' | 'create_job' | 'create_calendar_event' | 'create_payment' | 'unknown';
+export interface MarcusResponse { intent: MarcusIntent; parameters: Record<string, any>; missing_fields: string[]; ready_for_review: boolean; }
+export const MarcusService = {
+  finalize: (transcript: string) => api.post<MarcusResponse>('/marcus/finalize', {transcript}).then(r => r.data)
+};
+
 export default api;

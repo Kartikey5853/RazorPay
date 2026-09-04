@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { NavigationDock } from '../components/NavigationDock';
 import { Logo } from '../components/Logo';
+import { MarcusAssistant } from '../components/MarcusAssistant';
 
 export const MainLayout: React.FC = () => {
     const navigate = useNavigate();
@@ -65,6 +66,7 @@ export const MainLayout: React.FC = () => {
             </main>
 
             <NavigationDock />
+            <MarcusAssistant />
         </div>
     );
 };
