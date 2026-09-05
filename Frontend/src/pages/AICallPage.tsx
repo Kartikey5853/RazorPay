@@ -475,8 +475,39 @@ export const AICallPage: React.FC = () => {
                                     </div>
                                 </div>
                                 
-                                <div className="pt-4 flex justify-end">
-                                    <button onClick={() => navigate(`/person/${personId}`)} className="btn btn-primary py-2 px-8">
+                                {summaryResult.actions && summaryResult.actions.length > 0 && (
+                                    <div>
+                                        <h3 className="text-[10px] font-bold text-secondary uppercase tracking-widest mb-3 border-b pb-2 flex items-center gap-1.5">
+                                            <span className="material-symbols-outlined text-[14px]">auto_awesome</span>
+                                            Actions Prepared for Review ({summaryResult.actions.length})
+                                        </h3>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                            {summaryResult.actions.map((act: any, idx: number) => (
+                                                <div key={idx} className="p-3 bg-indigo-50/40 border border-indigo-100 rounded-lg flex flex-col justify-between">
+                                                    <div>
+                                                        <div className="flex items-center justify-between gap-1 mb-1">
+                                                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-white text-secondary border font-mono">
+                                                                {act.type}
+                                                            </span>
+                                                            <span className="text-[10px] text-amber-700 font-bold">Pending Review</span>
+                                                        </div>
+                                                        <p className="text-xs font-bold text-primary mt-1">{act.title}</p>
+                                                        {(act.description || act.reason) && (
+                                                            <p className="text-[10px] text-slate-600 mt-1 line-clamp-2">"{act.description || act.reason}"</p>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="pt-4 flex justify-between items-center border-t border-slate-100">
+                                    <button onClick={() => navigate('/dashboard')} className="btn btn-secondary py-2 px-5 text-xs font-bold flex items-center gap-1.5 shadow-sm">
+                                        <span className="material-symbols-outlined text-[16px]">inbox</span>
+                                        Review in Action Center
+                                    </button>
+                                    <button onClick={() => navigate(`/person/${personId}`)} className="btn btn-outline py-2 px-6 text-xs font-bold">
                                         Return to Profile
                                     </button>
                                 </div>

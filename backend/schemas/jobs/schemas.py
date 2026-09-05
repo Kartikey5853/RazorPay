@@ -48,6 +48,7 @@ class TaskUpdate(BaseModel):
     sprint: str | None = None
     due_date: datetime | None = None
     parent_task_id: str | None = None
+    job_id: str | None = None
     person_ids: list[str] | None = None
 
     @field_validator("due_date", mode="before")

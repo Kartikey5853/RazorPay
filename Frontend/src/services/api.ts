@@ -6,7 +6,7 @@ api.interceptors.response.use(r => r, (error: AxiosError<{detail?: string}>) => 
 export const errorMessage = (error: unknown) => axios.isAxiosError<{detail?: string}>(error) ? error.response?.data?.detail || error.message : 'Something went wrong';
 export interface User { id: string; name: string; email: string; business_name: string; timezone: string }
 export interface Person { id: string; name: string; type: string; email?: string; phone?: string; company?: string; location?: string; tags: string[]; notes?: string; created_at: string; updated_at: string; jobs?: Job[]; tasks?: Task[]; calls?: any[]; messages?: any[]; payments?: Payment[]; calendar_events?: CalendarEvent[]; }
-export interface Task { id: string; title: string; description?: string; status: string; priority?: string; sprint?: string; due_date?: string; created_at: string; people?: Person[]; parent_task_id?: string; }
+export interface Task { id: string; title: string; description?: string; status: string; priority?: string; sprint?: string; due_date?: string; created_at: string; people?: Person[]; parent_task_id?: string; job_id?: string; }
 export interface Milestone { id: string; title: string; date: string; created_at: string }
 export interface Payment { id: string; title: string; amount: number; currency: string; status: string; description?: string; due_at?: string; paid_at?: string; person_id?: string; job_id?: string; created_at: string; person_name?: string; job_title?: string; provider?: string; provider_link_id?: string; provider_payment_id?: string; metadata?: any; }
 export type PaymentInput = Omit<Payment, 'id' | 'created_at' | 'paid_at' | 'person_name' | 'job_title' | 'provider' | 'provider_link_id' | 'provider_payment_id' | 'metadata'>;
@@ -15,7 +15,7 @@ export interface Activity { id: string; type: string; title: string; description
 export interface CallAssistantConfig { objective: string; target_person: string; required_information: string[]; qualification_criteria: string[]; conversation_rules: string[]; disqualification_conditions: string[]; call_end_conditions: string[]; follow_up: string[] }
 export type PersonInput = Omit<Person, 'id' | 'created_at' | 'updated_at'>;
 export type JobInput = Pick<Job, 'title' | 'description' | 'objective' | 'status' | 'budget' | 'deadline' | 'requirements' | 'constraints'> & { person_ids?: string[] };
-export type TaskInput = Pick<Task, 'title' | 'description' | 'status' | 'priority' | 'sprint' | 'due_date' | 'parent_task_id'> & { person_ids?: string[] };
+export type TaskInput = Pick<Task, 'title' | 'description' | 'status' | 'priority' | 'sprint' | 'due_date' | 'parent_task_id' | 'job_id'> & { person_ids?: string[] };
 export type MilestoneInput = Pick<Milestone, 'title' | 'date'>;
 export const AuthService = { register: (data: {name:string;email:string;password:string;business_name:string;timezone?:string}) => api.post<{access_token:string;user:User}>('/auth/register', data).then(r=>r.data), login: (data:{email:string;password:string}) => api.post<{access_token:string;user:User}>('/auth/login', data).then(r=>r.data) };
 export const PeopleService = { getAll: (params?: {search?:string;type?:string}) => api.get<Person[]>('/people',{params}).then(r=>r.data), getById:(id:string)=>api.get<Person>(`/people/${id}`).then(r=>r.data), create:(data:PersonInput)=>api.post<Person>('/people',data).then(r=>r.data), update:(id:string,data:Partial<PersonInput>)=>api.patch<Person>(`/people/${id}`,data).then(r=>r.data), remove:(id:string)=>api.delete(`/people/${id}`), activities:(id:string)=>api.get<Activity[]>(`/people/${id}/activities`).then(r=>r.data) };
@@ -73,6 +73,42 @@ export const MarcusService = {
 
 export const EmailService = {
   send: (data: {subject: string; body: string; email: string; person_id?: string; job_id?: string;}) => api.post('/emails/send', data).then(r=>r.data)
+};
+
+export interface PendingAction {
+  id: string;
+  user_id: string;
+  job_id?: string;
+  job_title?: string;
+  person_id?: string;
+  person_name?: string;
+  call_id?: string;
+  type: 'reminder' | 'email' | 'task' | 'payment_reminder' | 'follow_up';
+  action_type?: string;
+  status: 'pending' | 'confirmed' | 'dismissed';
+  source: string;
+  title: string;
+  description?: string;
+  scheduled_at?: string;
+  payload: Record<string, any>;
+  created_at: string;
+  completed_at?: string;
+}
+
+export interface ActionSummary {
+  total_pending: number;
+  emails_count: number;
+  reminders_count: number;
+  tasks_count: number;
+  followups_count: number;
+}
+
+export const ActionCenterService = {
+  getPending: (type?: string) => api.get<PendingAction[]>('/actions/pending', { params: type ? { type } : undefined }).then(r => r.data),
+  getSummary: () => api.get<ActionSummary>('/actions/summary').then(r => r.data),
+  confirm: (id: string, overrides?: any) => api.post(`/actions/${id}/confirm`, overrides ? { overrides } : {}).then(r => r.data),
+  dismiss: (id: string) => api.post(`/actions/${id}/dismiss`).then(r => r.data),
+  update: (id: string, data: { title?: string; description?: string; payload?: any }) => api.patch<PendingAction>(`/actions/${id}`, data).then(r => r.data),
 };
 
 export default api;

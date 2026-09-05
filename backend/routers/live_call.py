@@ -39,6 +39,21 @@ class CallAction(BaseModel):
     reason: str | None = None
 
 
+class CallActionItem(BaseModel):
+    type: Literal["reminder", "email", "task", "payment_reminder", "follow_up"]
+    title: str
+    description: str | None = None
+    date: str | None = None
+    time: str | None = None
+    due_date: str | None = None
+    person: str | None = None
+    job: str | None = None
+    subject: str | None = None
+    body: str | None = None
+    amount: float | None = None
+    reason: str | None = None
+
+
 class CallSummary(BaseModel):
     call_outcome: Literal["interested", "not_interested", "needs_follow_up", "qualified", "unqualified"]
     summary: list[str]
@@ -47,6 +62,7 @@ class CallSummary(BaseModel):
     unanswered: list[str] = Field(default_factory=list)
     next_action: str | None = None
     action: CallAction
+    actions: list[CallActionItem] = Field(default_factory=list)
 
 
 class SummaryRequest(BaseModel):
@@ -71,8 +87,19 @@ def summarize_call(job_id: str, data: SummaryRequest, user=Depends(current_user)
     job = db.get(Job, job_id)
     if not job or job.user_id != user.id:
         raise HTTPException(status_code=404, detail="Job not found")
-    prompt = f"""Analyze this completed business call. MARCUS is the business representative and CANDIDATE is the contacted person. Create an accurate business record using only facts in the transcript.
-Extract candidate skills, concrete experience/projects, interests, availability, compensation, meaningful candidate questions, unanswered points, business outcome and next action. Do not confuse Marcus's statements with candidate facts or invent facts. `answered` must be yes, no, or partial. call_outcome must be interested, not_interested, needs_follow_up, qualified, or unqualified. Provide exactly 5 or 6 concise summary bullets.
+    prompt = f"""Analyze this completed business call. MARCUS is the business representative and CANDIDATE/CLIENT is the contacted person. Create an accurate business record using only facts in the transcript.
+Extract candidate skills, concrete experience/projects, interests, availability, compensation, meaningful questions, unanswered points, business outcome and next action. Do not confuse Marcus's statements with contact facts or invent facts. `answered` must be yes, no, or partial. call_outcome must be interested, not_interested, needs_follow_up, qualified, or unqualified. Provide exactly 5 or 6 concise summary bullets.
+
+CRITICAL POST-CALL ACTION EXTRACTION:
+Inspect the conversation transcript and identify any concrete actionable follow-up items mentioned:
+1. reminder: Meeting or time-based reminder (e.g., "Let's meet on Tuesday at 4 PM" -> type="reminder", title="Meeting with <Person>", date="Tuesday", time="16:00", reason="Mentioned during call")
+2. email: Commitments to send a proposal, quote, documents, portfolio, or follow-up email (e.g., "Send me the proposal" -> type="email", title="Send Proposal Email", person="<Person Name>", subject="Proposal Follow-up", body="Professional email body drafted based on the call")
+3. task: Actionable work to be completed (e.g., "Send mockup tomorrow" -> type="task", title="Send Homepage Mockup", job="<Job Name>", due_date="tomorrow")
+4. payment_reminder: Promised payments or payment dates (e.g., "I'll pay on Friday" -> type="payment_reminder", title="Payment Follow-up", amount=5000 (if mentioned, else null), due_date="Friday", reason="Client promised payment")
+5. follow_up: General follow-ups (e.g., "Wait for documents" -> type="follow_up", title="Follow up on Documents", reason="Waiting for documents from contact")
+
+Do not execute these actions; extract them accurately into `actions`. If no action of a type was mentioned, omit it.
+
 TRANSCRIPT:
 {data.transcript}"""
     client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))

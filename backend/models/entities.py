@@ -91,9 +91,23 @@ class Milestone(Base):
 
 class Action(Base):
     __tablename__ = "actions"
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=uid); user_id: Mapped[str] = mapped_column(ForeignKey("users.id")); job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id"), nullable=True); person_id: Mapped[str | None] = mapped_column(ForeignKey("people.id"), nullable=True)
-    type: Mapped[str] = mapped_column(String); status: Mapped[str] = mapped_column(String, default="pending"); title: Mapped[str] = mapped_column(String); description: Mapped[str | None] = mapped_column(Text, nullable=True); scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    payload: Mapped[dict] = mapped_column(JSON, default=dict); result: Mapped[dict | None] = mapped_column(JSON, nullable=True); error: Mapped[str | None] = mapped_column(Text, nullable=True); created_at: Mapped[datetime] = mapped_column(DateTime, default=now); started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True); completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id"), nullable=True)
+    person_id: Mapped[str | None] = mapped_column(ForeignKey("people.id"), nullable=True)
+    call_id: Mapped[str | None] = mapped_column(ForeignKey("calls.id"), nullable=True)
+    type: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="pending")
+    source: Mapped[str] = mapped_column(String, default="call")
+    title: Mapped[str] = mapped_column(String)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 class Activity(Base):
     __tablename__ = "activities"

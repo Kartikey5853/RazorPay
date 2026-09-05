@@ -286,6 +286,31 @@ export const PersonProfilePage: React.FC = () => {
                                                                 "{item.transcript}"
                                                             </div>
                                                         )}
+                                                        {item.extracted_data?.actions && item.extracted_data.actions.length > 0 && (
+                                                            <div className="mt-3 pt-2.5 border-t border-slate-200/80">
+                                                                <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-2 flex items-center gap-1">
+                                                                    <span className="material-symbols-outlined text-[13px] text-secondary">auto_awesome</span>
+                                                                    Suggested Actions
+                                                                </p>
+                                                                <div className="flex flex-col gap-1.5">
+                                                                    {item.extracted_data.actions.map((act: any, aIdx: number) => (
+                                                                        <div key={aIdx} className="flex items-center justify-between gap-2 p-2 bg-white rounded-md border border-slate-200 text-xs shadow-xs">
+                                                                            <div className="flex items-center gap-2 min-w-0">
+                                                                                <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-mono">
+                                                                                    {act.type || act.action_type || 'action'}
+                                                                                </span>
+                                                                                <span className="font-medium text-primary truncate">{act.title}</span>
+                                                                            </div>
+                                                                            <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${
+                                                                                act.status === 'confirmed' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'
+                                                                            }`}>
+                                                                                {act.status || 'Pending'}
+                                                                            </span>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 ) : (
                                                     <p className="text-xs text-primary mt-1">{item.content}</p>

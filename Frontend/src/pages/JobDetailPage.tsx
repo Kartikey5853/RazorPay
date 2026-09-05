@@ -35,6 +35,7 @@ export const JobDetailPage: React.FC = () => {
     // Person Modal State
     const [isPersonModalOpen, setPersonModalOpen] = useState(false);
     const [availablePeople, setAvailablePeople] = useState<Person[]>([]);
+    const [availableJobs, setAvailableJobs] = useState<Job[]>([]);
     const [targetTypeForPerson, setTargetTypeForPerson] = useState<'job' | 'task'>('job');
 
     // Description editing state
@@ -73,6 +74,8 @@ export const JobDetailPage: React.FC = () => {
         JobsService.getActivities(id).then(data => {
             setActivities(data);
         }).catch(console.error).finally(() => setLoading(false));
+
+        JobsService.getAll().then(setAvailableJobs).catch(console.error);
     };
 
     useEffect(() => {
@@ -917,6 +920,24 @@ export const JobDetailPage: React.FC = () => {
                                                     {call.extracted_data.call_outcome}
                                                 </span>
                                             )}
+                                            {call.extracted_data?.actions && call.extracted_data.actions.length > 0 && (
+                                                <div className="mt-2.5 pt-2 border-t border-slate-100">
+                                                    <p className="text-[9px] font-bold text-on-surface-variant uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                                                        <span className="material-symbols-outlined text-[12px] text-secondary">auto_awesome</span>
+                                                        Suggested Actions
+                                                    </p>
+                                                    <div className="space-y-1">
+                                                        {call.extracted_data.actions.map((act: any, aIdx: number) => (
+                                                            <div key={aIdx} className="flex items-center justify-between text-[11px] bg-slate-50 p-1.5 rounded border border-slate-200/60">
+                                                                <span className="font-medium text-primary truncate mr-1">{act.title}</span>
+                                                                <span className="text-[8px] uppercase font-bold px-1 rounded bg-white text-slate-600 border shrink-0">
+                                                                    {act.type || 'action'}
+                                                                </span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
                                     ))}
                                 </div>
@@ -996,7 +1017,7 @@ export const JobDetailPage: React.FC = () => {
 
                         <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6">
 
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50/70 p-3.5 rounded-xl border border-slate-200">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-slate-50/70 p-3.5 rounded-xl border border-slate-200">
                                 <div>
                                     <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-1">Status</label>
                                     <select
@@ -1030,6 +1051,25 @@ export const JobDetailPage: React.FC = () => {
                                         value={activeTask.due_date ? activeTask.due_date.slice(0, 10) : ''}
                                         onChange={(e) => handleUpdateTask(activeTask, { due_date: e.target.value ? new Date(e.target.value).toISOString() : (null as any) })}
                                     />
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-1">Associated Job</label>
+                                    <select
+                                        className="w-full bg-white text-primary text-xs font-medium px-2 py-1.5 border rounded outline-none cursor-pointer truncate"
+                                        value={activeTask.job_id || (job ? job.id : '')}
+                                        onChange={async (e) => {
+                                            const newJobId = e.target.value;
+                                            if (newJobId && newJobId !== (activeTask.job_id || (job ? job.id : ''))) {
+                                                await handleUpdateTask(activeTask, { job_id: newJobId });
+                                                setTaskModalOpen(false);
+                                                setActiveTask(null);
+                                            }
+                                        }}
+                                    >
+                                        {availableJobs.map(j => (
+                                            <option key={j.id} value={j.id}>{j.title}</option>
+                                        ))}
+                                    </select>
                                 </div>
                             </div>
 

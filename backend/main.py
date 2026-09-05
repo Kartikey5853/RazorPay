@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta
 from typing import Annotated
 
@@ -376,6 +377,13 @@ def save_call(
         if person:
             activity(db, user.id, "AI_CALL_COMPLETED", f"AI Call Completed — {person.name} ({data.duration_seconds}s)", person_id=person.id, job_id=data.job_id)
 
+    # Automatically create pending actions if actions were extracted
+    if data.extracted_data and isinstance(data.extracted_data, dict):
+        raw_actions = data.extracted_data.get("actions", [])
+        if raw_actions:
+            from services.action_service import create_pending_actions_from_call
+            create_pending_actions_from_call(db, user, call, raw_actions)
+
     return serialize(call)
 
 @app.get("/people/{person_id}/activities")
@@ -718,6 +726,13 @@ def update_task(
     
     payload = data.model_dump(exclude_unset=True)
     person_ids = payload.pop("person_ids", None)
+    new_job_id = payload.pop("job_id", None)
+    if new_job_id is not None and new_job_id != task.job_id:
+        owned(db, Job, new_job_id, user.id)
+        task.job_id = new_job_id
+        subtasks = db.scalars(select(Task).where(Task.parent_task_id == task.id)).all()
+        for st in subtasks:
+            st.job_id = new_job_id
 
     for key, value in payload.items():
         setattr(task, key, value)
@@ -839,6 +854,179 @@ def send_email(
     
     db.commit()
     return {"status": "success", "message": "Email sent."}
+
+
+# ============================================================
+# MARCUS ACTION CENTER / PENDING ACTIONS
+# ============================================================
+
+class ActionUpdateRequest(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    payload: dict | None = None
+
+class ActionConfirmRequest(BaseModel):
+    overrides: dict | None = None
+
+class ExtractActionsRequest(BaseModel):
+    transcript: str
+    call_id: str | None = None
+    person_id: str | None = None
+    job_id: str | None = None
+
+@app.get("/actions/pending")
+def get_pending_actions(
+    type: str | None = None,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    query = select(Action).where(
+        Action.user_id == user.id,
+        Action.status == "pending"
+    ).order_by(Action.created_at.desc())
+
+    if type:
+        query = query.where(Action.type == type)
+
+    actions = db.scalars(query).all()
+    results = []
+    for act in actions:
+        d = serialize(act)
+        d["action_type"] = act.type
+        if act.person_id:
+            p = db.get(Person, act.person_id)
+            if p:
+                d["person_name"] = p.name
+                if not d.get("payload", {}).get("email") and p.email:
+                    if "payload" not in d or not isinstance(d["payload"], dict):
+                        d["payload"] = {}
+                    d["payload"]["email"] = p.email
+        if act.job_id:
+            j = db.get(Job, act.job_id)
+            if j:
+                d["job_title"] = j.title
+        results.append(d)
+    return results
+
+@app.get("/actions/summary")
+def get_actions_summary(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    all_pending = db.scalars(
+        select(Action).where(
+            Action.user_id == user.id,
+            Action.status == "pending"
+        )
+    ).all()
+
+    emails_count = sum(1 for a in all_pending if a.type == "email")
+    reminders_count = sum(1 for a in all_pending if a.type in ("reminder", "payment_reminder"))
+    tasks_count = sum(1 for a in all_pending if a.type == "task")
+    followups_count = sum(1 for a in all_pending if a.type == "follow_up")
+
+    return {
+        "total_pending": len(all_pending),
+        "emails_count": emails_count,
+        "reminders_count": reminders_count,
+        "tasks_count": tasks_count,
+        "followups_count": followups_count,
+    }
+
+@app.patch("/actions/{action_id}")
+def update_action(
+    action_id: str,
+    data: ActionUpdateRequest,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    action = db.get(Action, action_id)
+    if not action or action.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Action not found")
+    
+    if data.title is not None:
+        action.title = data.title
+    if data.description is not None:
+        action.description = data.description
+    if data.payload is not None:
+        merged = dict(action.payload or {})
+        merged.update(data.payload)
+        action.payload = merged
+    
+    db.commit()
+    db.refresh(action)
+    d = serialize(action)
+    d["action_type"] = action.type
+    return d
+
+@app.post("/actions/{action_id}/confirm")
+def confirm_action_endpoint(
+    action_id: str,
+    data: ActionConfirmRequest | None = None,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    from services.action_service import confirm_action
+    try:
+        overrides = data.overrides if data else None
+        res = confirm_action(db, user, action_id, overrides=overrides)
+        return res
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to execute action: {str(e)}")
+
+@app.post("/actions/{action_id}/dismiss")
+def dismiss_action_endpoint(
+    action_id: str,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    from services.action_service import dismiss_action
+    try:
+        res = dismiss_action(db, user, action_id)
+        return res
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/actions/extract-from-transcript")
+def extract_actions_from_transcript(
+    data: ExtractActionsRequest,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    from google import genai
+    from routers.live_call import SUMMARY_MODEL, CallSummary
+    from services.action_service import create_pending_actions_from_call
+
+    prompt = f"""Analyze this completed business call and extract all concrete post-call action items:
+1. reminder: Meeting or time-based reminder (title, date, time, reason)
+2. email: Commitments to send proposal, quotation, documents, portfolio, or follow-up email (title, person, subject, body)
+3. task: Actionable work to be completed (title, job, due_date)
+4. payment_reminder: Promised payments or payment dates (title, amount, due_date, reason)
+5. follow_up: General follow-ups (title, date, reason)
+
+Do not execute these actions; extract them accurately into `actions`.
+
+TRANSCRIPT:
+{data.transcript}"""
+
+    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+    response = client.models.generate_content(model=SUMMARY_MODEL, contents=prompt, config={"response_mime_type": "application/json", "response_schema": CallSummary})
+    if response.parsed is None:
+        raise HTTPException(status_code=502, detail="Gemini could not analyze transcript")
+    
+    class MockCall:
+        id = data.call_id
+        person_id = data.person_id
+        job_id = data.job_id
+        extracted_data = {}
+
+    created = create_pending_actions_from_call(db, user, MockCall, [a.model_dump() for a in response.parsed.actions])
+    return {
+        "summary": response.parsed.summary,
+        "actions": [serialize(a) for a in created]
+    }
 
 
 # ============================================================
