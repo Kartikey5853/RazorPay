@@ -14,6 +14,16 @@ export const JobDetailPage: React.FC = () => {
 
     const [showTaskForm, setShowTaskForm] = useState(false);
     const [newTaskTitle, setNewTaskTitle] = useState('');
+    const [newTaskDueDate, setNewTaskDueDate] = useState('');
+    const [newTaskDescription, setNewTaskDescription] = useState('');
+    const [newTaskPersonId, setNewTaskPersonId] = useState('');
+    const [newTaskSubtasks, setNewTaskSubtasks] = useState<string[]>([]);
+    const [newSubtaskDraft, setNewSubtaskDraft] = useState('');
+    const [quickSubtaskParentId, setQuickSubtaskParentId] = useState<string | null>(null);
+    const [quickSubtaskTitle, setQuickSubtaskTitle] = useState('');
+
+    const [isEditingTitle, setIsEditingTitle] = useState(false);
+    const [titleInput, setTitleInput] = useState('');
 
     const [showSubtaskForm, setShowSubtaskForm] = useState(false);
     const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
@@ -82,9 +92,36 @@ export const JobDetailPage: React.FC = () => {
         e.preventDefault();
         if (!newTaskTitle.trim() || !job) return;
         try {
-            await JobsService.createTask(job.id, { title: newTaskTitle, status: 'To Do' });
+            await JobsService.createTask(job.id, {
+                title: newTaskTitle.trim(),
+                status: 'To Do',
+                description: newTaskDescription.trim() || undefined,
+                due_date: newTaskDueDate ? new Date(newTaskDueDate).toISOString() : undefined,
+                person_ids: newTaskPersonId ? [newTaskPersonId] : [],
+                subtasks: newTaskSubtasks.filter(st => st.trim().length > 0)
+            } as any);
             setNewTaskTitle('');
+            setNewTaskDueDate('');
+            setNewTaskDescription('');
+            setNewTaskPersonId('');
+            setNewTaskSubtasks([]);
+            setNewSubtaskDraft('');
             setShowTaskForm(false);
+            loadData();
+        } catch (err) { console.error(err); }
+    };
+
+    const handleQuickAddSubtask = async (e: React.FormEvent, parentTaskId: string) => {
+        e.preventDefault();
+        if (!quickSubtaskTitle.trim() || !job) return;
+        try {
+            await JobsService.createTask(job.id, {
+                title: quickSubtaskTitle.trim(),
+                status: 'To Do',
+                parent_task_id: parentTaskId
+            });
+            setQuickSubtaskTitle('');
+            setQuickSubtaskParentId(null);
             loadData();
         } catch (err) { console.error(err); }
     };
@@ -190,9 +227,18 @@ export const JobDetailPage: React.FC = () => {
 
     const openTask = (task: Task) => {
         setActiveTask(task);
+        setIsEditingTitle(false);
+        setTitleInput(task.title);
         setIsEditingDesc(false);
         setDescInput(task.description || '');
         setTaskModalOpen(true);
+    };
+
+    const saveTitle = () => {
+        if (activeTask && titleInput.trim()) {
+            handleUpdateTask(activeTask, { title: titleInput.trim() });
+            setIsEditingTitle(false);
+        }
     };
 
     const saveDescription = () => {
@@ -331,21 +377,132 @@ export const JobDetailPage: React.FC = () => {
                         <section className="flex flex-col flex-1">
                             <div className="flex justify-between items-center mb-4 mt-2">
                                 <h2 className="text-lg font-bold text-primary tracking-tight">Tasks</h2>
-                                <button onClick={() => setShowTaskForm(!showTaskForm)} className="btn btn-primary text-xs py-1.5 px-4 rounded shadow-sm font-medium">Add task</button>
+                                <button
+                                    onClick={() => setShowTaskForm(!showTaskForm)}
+                                    className="btn btn-primary text-xs py-1.5 px-4 rounded shadow-sm font-medium flex items-center gap-1"
+                                >
+                                    <span className="material-symbols-outlined text-[16px]">add</span>
+                                    Add task
+                                </button>
                             </div>
 
                             {showTaskForm && (
-                                <form onSubmit={handleCreateTask} className="mb-4 bg-white border border-slate-200 rounded-lg p-3 shadow-sm flex gap-2">
+                                <form onSubmit={handleCreateTask} className="mb-5 bg-white border border-slate-200 rounded-xl p-4 shadow-md flex flex-col gap-3">
+                                    <div className="flex justify-between items-center pb-2 border-b">
+                                        <h3 className="text-xs font-bold text-primary uppercase tracking-wider">New Task</h3>
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowTaskForm(false)}
+                                            className="text-slate-400 hover:text-slate-600 text-sm"
+                                        >
+                                            ✕
+                                        </button>
+                                    </div>
                                     <input
                                         autoFocus
                                         type="text"
-                                        className="flex-1 border rounded px-3 py-1.5 text-sm outline-none focus:border-secondary"
-                                        placeholder="What needs to be done?"
+                                        className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-secondary focus:ring-1 focus:ring-secondary"
+                                        placeholder="Task title (e.g. Build homepage)"
                                         value={newTaskTitle}
                                         onChange={e => setNewTaskTitle(e.target.value)}
+                                        required
                                     />
-                                    <button type="submit" className="btn btn-primary text-xs py-1.5 px-4 rounded">Save</button>
-                                    <button type="button" onClick={() => setShowTaskForm(false)} className="btn btn-outline text-xs py-1.5 px-4 rounded">Cancel</button>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">Due Date</label>
+                                            <input
+                                                type="date"
+                                                className="w-full border rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-secondary bg-slate-50 text-slate-700"
+                                                value={newTaskDueDate}
+                                                onChange={e => setNewTaskDueDate(e.target.value)}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">Assignee (Optional)</label>
+                                            <select
+                                                className="w-full border rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-secondary bg-slate-50 text-slate-700"
+                                                value={newTaskPersonId}
+                                                onChange={e => setNewTaskPersonId(e.target.value)}
+                                            >
+                                                <option value="">No assignee</option>
+                                                {availablePeople.map(p => (
+                                                    <option key={p.id} value={p.id}>{p.name} {p.company ? `(${p.company})` : ''}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <textarea
+                                        className="w-full border rounded-lg px-3 py-1.5 text-xs outline-none focus:border-secondary resize-none"
+                                        rows={2}
+                                        placeholder="Notes or description (optional)..."
+                                        value={newTaskDescription}
+                                        onChange={e => setNewTaskDescription(e.target.value)}
+                                    />
+                                    {/* Initial subtasks builder */}
+                                    <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Subtasks</label>
+                                        {newTaskSubtasks.length > 0 && (
+                                            <div className="space-y-1 mb-2">
+                                                {newTaskSubtasks.map((st, idx) => (
+                                                    <div key={idx} className="flex items-center justify-between text-xs bg-white px-2.5 py-1 rounded border">
+                                                        <span className="text-slate-700">├─ {st}</span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setNewTaskSubtasks(prev => prev.filter((_, i) => i !== idx))}
+                                                            className="text-slate-400 hover:text-red-600 text-xs"
+                                                        >
+                                                            ✕
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="text"
+                                                className="flex-1 border rounded px-2.5 py-1 text-xs outline-none focus:border-secondary bg-white"
+                                                placeholder="Add a subtask (e.g. Get logo)"
+                                                value={newSubtaskDraft}
+                                                onChange={e => setNewSubtaskDraft(e.target.value)}
+                                                onKeyDown={e => {
+                                                    if (e.key === 'Enter') {
+                                                        e.preventDefault();
+                                                        if (newSubtaskDraft.trim()) {
+                                                            setNewTaskSubtasks(prev => [...prev, newSubtaskDraft.trim()]);
+                                                            setNewSubtaskDraft('');
+                                                        }
+                                                    }
+                                                }}
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    if (newSubtaskDraft.trim()) {
+                                                        setNewTaskSubtasks(prev => [...prev, newSubtaskDraft.trim()]);
+                                                        setNewSubtaskDraft('');
+                                                    }
+                                                }}
+                                                className="btn btn-outline text-xs py-1 px-3 rounded"
+                                            >
+                                                + Add
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-end gap-2 pt-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowTaskForm(false)}
+                                            className="btn btn-outline text-xs py-1.5 px-4 rounded"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            className="btn btn-primary text-xs py-1.5 px-4 rounded shadow-sm font-semibold"
+                                        >
+                                            Create Task
+                                        </button>
+                                    </div>
                                 </form>
                             )}
 
@@ -355,45 +512,166 @@ export const JobDetailPage: React.FC = () => {
                                 </div>
                             ) : (
                                 <div className="bg-white border border-slate-200 rounded-lg overflow-hidden flex flex-col shadow-sm">
-                                    {topLevelTasks.map(task => (
-                                        <div key={task.id} className="border-b last:border-b-0 border-slate-100 p-3 hover:bg-slate-50 cursor-pointer transition-colors group flex gap-3 items-start" onClick={() => openTask(task)}>
-                                            <input
-                                                type="checkbox"
-                                                className="w-4 h-4 mt-1 accent-secondary rounded-sm cursor-pointer"
-                                                checked={task.status === 'Done'}
-                                                onClick={(e) => e.stopPropagation()}
-                                                onChange={(e) => handleUpdateTask(task, { status: e.target.checked ? 'Done' : 'To Do' })}
-                                            />
-                                            <div className="flex-1 min-w-0 flex flex-col gap-1">
-                                                <div className="flex items-center justify-between gap-4">
-                                                    <span className={`text-sm font-medium text-primary truncate ${task.status === 'Done' ? 'line-through opacity-60' : ''}`}>{task.title}</span>
-                                                    <div className="flex items-center gap-3 shrink-0">
-                                                        {task.status !== 'Done' && task.status !== 'To Do' && (
-                                                            <span className="text-[10px] text-secondary bg-indigo-50 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">
-                                                                {task.status}
+                                    {topLevelTasks.map(task => {
+                                        const subtasks = tasks.filter(t => t.parent_task_id === task.id);
+                                        const isTaskDone = task.status === 'Done' || task.status === 'completed';
+                                        return (
+                                            <div key={task.id} className="border-b last:border-b-0 border-slate-100 flex flex-col">
+                                                {/* Parent Task Row */}
+                                                <div
+                                                    className="p-3 hover:bg-slate-50 cursor-pointer transition-colors group flex gap-3 items-start"
+                                                    onClick={() => openTask(task)}
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        className="w-4 h-4 mt-1 accent-secondary rounded-sm cursor-pointer"
+                                                        checked={isTaskDone}
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        onChange={(e) => handleUpdateTask(task, { status: e.target.checked ? 'Done' : 'To Do' })}
+                                                    />
+                                                    <div className="flex-1 min-w-0 flex flex-col gap-1">
+                                                        <div className="flex items-center justify-between gap-4">
+                                                            <span className={`text-sm font-medium text-primary truncate ${isTaskDone ? 'line-through opacity-60' : ''}`}>
+                                                                {task.title}
                                                             </span>
-                                                        )}
-                                                        {task.due_date && (
-                                                            <span className="text-xs text-on-surface-variant flex items-center gap-1">
-                                                                <span className="material-symbols-outlined text-[14px]">event</span>
-                                                                {new Date(task.due_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                                                            </span>
-                                                        )}
-                                                        <div className="flex -space-x-1.5 min-w-[40px] justify-end">
-                                                            {task.people && task.people.map(p => (
-                                                                <div key={p.id} className="w-5 h-5 rounded-full bg-slate-200 border border-white flex items-center justify-center text-[8px] font-bold text-primary z-10" title={p.name}>
-                                                                    {p.name.substring(0, 2).toUpperCase()}
+                                                            <div className="flex items-center gap-2 shrink-0">
+                                                                {task.status !== 'Done' && task.status !== 'To Do' && (
+                                                                    <span className="text-[10px] text-secondary bg-indigo-50 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">
+                                                                        {task.status}
+                                                                    </span>
+                                                                )}
+                                                                {task.due_date && (
+                                                                    <span className="text-xs text-on-surface-variant flex items-center gap-1">
+                                                                        <span className="material-symbols-outlined text-[14px]">event</span>
+                                                                        {new Date(task.due_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                                                    </span>
+                                                                )}
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setQuickSubtaskParentId(quickSubtaskParentId === task.id ? null : task.id);
+                                                                        setQuickSubtaskTitle('');
+                                                                    }}
+                                                                    className="text-slate-400 hover:text-secondary p-1 rounded hover:bg-slate-200/50 transition-colors"
+                                                                    title="Add subtask"
+                                                                >
+                                                                    <span className="material-symbols-outlined text-[16px]">add_task</span>
+                                                                </button>
+                                                                <div className="flex -space-x-1.5 min-w-[30px] justify-end">
+                                                                    {task.people && task.people.map(p => (
+                                                                        <div key={p.id} className="w-5 h-5 rounded-full bg-slate-200 border border-white flex items-center justify-center text-[8px] font-bold text-primary z-10" title={p.name}>
+                                                                            {p.name.substring(0, 2).toUpperCase()}
+                                                                        </div>
+                                                                    ))}
                                                                 </div>
-                                                            ))}
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        handleDeleteTask(task.id);
+                                                                    }}
+                                                                    className="text-slate-300 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-0.5"
+                                                                    title="Delete task"
+                                                                >
+                                                                    <span className="material-symbols-outlined text-[16px]">delete</span>
+                                                                </button>
+                                                            </div>
                                                         </div>
+                                                        {task.description && (
+                                                            <span className="text-xs text-on-surface-variant truncate opacity-80">{task.description}</span>
+                                                        )}
                                                     </div>
                                                 </div>
-                                                {task.description && (
-                                                    <span className="text-xs text-on-surface-variant truncate opacity-80">{task.description}</span>
+
+                                                {/* Subtasks Tree Hierarchy */}
+                                                {(subtasks.length > 0 || quickSubtaskParentId === task.id) && (
+                                                    <div className="ml-7 border-l-2 border-indigo-100 pl-3 py-1 space-y-1 mb-2 bg-slate-50/40 rounded-r">
+                                                        {subtasks.map((sub, sIdx) => {
+                                                            const isLast = sIdx === subtasks.length - 1 && quickSubtaskParentId !== task.id;
+                                                            const isSubDone = sub.status === 'Done' || sub.status === 'completed';
+                                                            return (
+                                                                <div
+                                                                    key={sub.id}
+                                                                    className="flex items-center justify-between gap-2 p-1.5 rounded hover:bg-slate-100 cursor-pointer group/sub transition-colors"
+                                                                    onClick={() => openTask(sub)}
+                                                                >
+                                                                    <div className="flex items-center gap-2 min-w-0">
+                                                                        <span className="text-slate-400 font-mono text-xs select-none">
+                                                                            {isLast ? '└─' : '├─'}
+                                                                        </span>
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            className="w-3.5 h-3.5 accent-secondary rounded-sm cursor-pointer"
+                                                                            checked={isSubDone}
+                                                                            onClick={(e) => e.stopPropagation()}
+                                                                            onChange={(e) => handleUpdateTask(sub, { status: e.target.checked ? 'Done' : 'To Do' })}
+                                                                        />
+                                                                        <span className={`text-xs text-primary font-medium truncate ${isSubDone ? 'line-through opacity-60' : ''}`}>
+                                                                            {sub.title}
+                                                                        </span>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2 shrink-0">
+                                                                        {sub.due_date && (
+                                                                            <span className="text-[10px] text-on-surface-variant flex items-center gap-0.5">
+                                                                                <span className="material-symbols-outlined text-[12px]">event</span>
+                                                                                {new Date(sub.due_date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                                                            </span>
+                                                                        )}
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                handleDeleteTask(sub.id, true);
+                                                                            }}
+                                                                            className="text-slate-300 hover:text-red-600 opacity-0 group-hover/sub:opacity-100 transition-opacity p-0.5"
+                                                                            title="Delete subtask"
+                                                                        >
+                                                                            <span className="material-symbols-outlined text-[14px]">close</span>
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+
+                                                        {/* Quick Inline Subtask Form */}
+                                                        {quickSubtaskParentId === task.id && (
+                                                            <form
+                                                                onSubmit={(e) => handleQuickAddSubtask(e, task.id)}
+                                                                className="flex items-center gap-2 p-1.5"
+                                                            >
+                                                                <span className="text-slate-400 font-mono text-xs select-none">└─</span>
+                                                                <input
+                                                                    autoFocus
+                                                                    type="text"
+                                                                    className="flex-1 border rounded px-2.5 py-1 text-xs outline-none focus:border-secondary bg-white text-primary"
+                                                                    placeholder="Subtask title (e.g. Get logo)"
+                                                                    value={quickSubtaskTitle}
+                                                                    onChange={e => setQuickSubtaskTitle(e.target.value)}
+                                                                />
+                                                                <button
+                                                                    type="submit"
+                                                                    className="btn btn-primary text-xs py-1 px-3 rounded shadow-sm"
+                                                                >
+                                                                    Add
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setQuickSubtaskParentId(null);
+                                                                        setQuickSubtaskTitle('');
+                                                                    }}
+                                                                    className="text-slate-400 hover:text-slate-600 text-xs px-1"
+                                                                >
+                                                                    ✕
+                                                                </button>
+                                                            </form>
+                                                        )}
+                                                    </div>
                                                 )}
                                             </div>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             )}
                         </section>
@@ -672,23 +950,45 @@ export const JobDetailPage: React.FC = () => {
                 <div className="fixed inset-0 bg-slate-900/30 z-50 flex justify-end">
                     <div className="bg-white shadow-2xl w-full max-w-xl h-full flex flex-col animate-slide-in-right">
                         <div className="p-4 border-b flex justify-between items-start bg-slate-50">
-                            <div className="flex gap-3 pt-1">
+                            <div className="flex gap-3 pt-1 flex-1 min-w-0 pr-4">
                                 <input
                                     type="checkbox"
-                                    className="w-4 h-4 mt-1 accent-secondary rounded-sm cursor-pointer"
-                                    checked={activeTask.status === 'Done'}
+                                    className="w-4 h-4 mt-1 accent-secondary rounded-sm cursor-pointer shrink-0"
+                                    checked={activeTask.status === 'Done' || activeTask.status === 'completed'}
                                     onChange={(e) => handleUpdateTask(activeTask, { status: e.target.checked ? 'Done' : 'To Do' })}
                                 />
-                                <div>
-                                    <h3 className="text-lg font-bold text-primary leading-tight">{activeTask.title}</h3>
-                                    <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mt-1 block">Task Details</span>
+                                <div className="flex-1 min-w-0">
+                                    {isEditingTitle ? (
+                                        <div className="flex items-center gap-1.5 mt-0.5">
+                                            <input
+                                                type="text"
+                                                autoFocus
+                                                className="w-full text-sm font-bold border rounded px-2 py-1 outline-none focus:border-secondary text-primary"
+                                                value={titleInput}
+                                                onChange={e => setTitleInput(e.target.value)}
+                                                onKeyDown={e => { if (e.key === 'Enter') saveTitle(); if (e.key === 'Escape') setIsEditingTitle(false); }}
+                                            />
+                                            <button onClick={saveTitle} className="btn btn-primary text-xs px-2.5 py-1 rounded">Save</button>
+                                            <button onClick={() => setIsEditingTitle(false)} className="btn btn-outline text-xs px-2 py-1 rounded">✕</button>
+                                        </div>
+                                    ) : (
+                                        <div className="group/title flex items-center gap-1.5 cursor-pointer" onClick={() => { setIsEditingTitle(true); setTitleInput(activeTask.title); }}>
+                                            <h3 className="text-lg font-bold text-primary leading-tight hover:text-secondary transition-colors truncate">{activeTask.title}</h3>
+                                            <span className="material-symbols-outlined text-xs text-slate-400 group-hover/title:text-secondary opacity-0 group-hover/title:opacity-100 transition-opacity">edit</span>
+                                        </div>
+                                    )}
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block">
+                                            {activeTask.parent_task_id ? 'Subtask Details' : 'Task Details'}
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
-                            <div className="flex items-center gap-1">
-                                <button onClick={() => handleDeleteTask(activeTask.id)} className="text-on-surface-variant hover:text-error p-1.5 rounded transition-colors">
+                            <div className="flex items-center gap-1 shrink-0">
+                                <button onClick={() => handleDeleteTask(activeTask.id, !!activeTask.parent_task_id)} className="text-on-surface-variant hover:text-error p-1.5 rounded transition-colors" title="Delete">
                                     <span className="material-symbols-outlined text-[18px]">delete</span>
                                 </button>
-                                <button onClick={() => setTaskModalOpen(false)} className="text-on-surface-variant hover:text-primary p-1.5 rounded transition-colors">
+                                <button onClick={() => setTaskModalOpen(false)} className="text-on-surface-variant hover:text-primary p-1.5 rounded transition-colors" title="Close">
                                     <span className="material-symbols-outlined text-[20px]">close</span>
                                 </button>
                             </div>
@@ -696,7 +996,7 @@ export const JobDetailPage: React.FC = () => {
 
                         <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6">
 
-                            <div className="grid grid-cols-2 gap-4 bg-slate-50/50 p-4 rounded-lg border border-slate-100">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50/70 p-3.5 rounded-xl border border-slate-200">
                                 <div>
                                     <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-1">Status</label>
                                     <select
@@ -722,15 +1022,24 @@ export const JobDetailPage: React.FC = () => {
                                         <option value="High">High</option>
                                     </select>
                                 </div>
+                                <div>
+                                    <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-1">Due Date</label>
+                                    <input
+                                        type="date"
+                                        className="w-full bg-white text-primary text-xs font-medium px-2 py-1.5 border rounded outline-none cursor-pointer"
+                                        value={activeTask.due_date ? activeTask.due_date.slice(0, 10) : ''}
+                                        onChange={(e) => handleUpdateTask(activeTask, { due_date: e.target.value ? new Date(e.target.value).toISOString() : (null as any) })}
+                                    />
+                                </div>
                             </div>
 
-                            {/* Description */}
+                            {/* Description / Notes */}
                             <div>
-                                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-2">Description</label>
+                                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest block mb-2">Description / Notes</label>
                                 {isEditingDesc ? (
                                     <div className="flex flex-col gap-2">
                                         <textarea
-                                            className="w-full text-sm p-3 border rounded outline-none focus:border-secondary min-h-[100px]"
+                                            className="w-full text-sm p-3 border rounded-lg outline-none focus:border-secondary min-h-[100px]"
                                             value={descInput}
                                             onChange={e => setDescInput(e.target.value)}
                                             placeholder="Add notes or description..."
@@ -743,7 +1052,7 @@ export const JobDetailPage: React.FC = () => {
                                     </div>
                                 ) : (
                                     <div
-                                        className={`text-sm p-3 border rounded cursor-pointer hover:bg-slate-50 transition-colors ${!activeTask.description ? 'text-on-surface-variant italic' : 'text-primary'}`}
+                                        className={`text-sm p-3 border rounded-lg cursor-pointer hover:bg-slate-50 transition-colors ${!activeTask.description ? 'text-on-surface-variant italic' : 'text-primary'}`}
                                         onClick={() => {
                                             setDescInput(activeTask.description || '');
                                             setIsEditingDesc(true);
@@ -754,48 +1063,56 @@ export const JobDetailPage: React.FC = () => {
                                 )}
                             </div>
 
-                            {/* Subtasks */}
-                            <div>
-                                <div className="flex items-center justify-between mb-2">
-                                    <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Subtasks</label>
-                                    <button onClick={() => setShowSubtaskForm(!showSubtaskForm)} className="text-secondary text-[10px] font-bold hover:underline">+ Add subtask</button>
-                                </div>
+                            {/* Subtasks (only for top-level tasks) */}
+                            {!activeTask.parent_task_id && (
+                                <div>
+                                    <div className="flex items-center justify-between mb-2">
+                                        <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Subtasks</label>
+                                        <button onClick={() => setShowSubtaskForm(!showSubtaskForm)} className="text-secondary text-[10px] font-bold hover:underline">+ Add subtask</button>
+                                    </div>
 
-                                {showSubtaskForm && (
-                                    <form onSubmit={handleCreateSubtask} className="mb-3 flex gap-2">
-                                        <input
-                                            autoFocus type="text"
-                                            className="flex-1 border rounded px-2 py-1 text-xs outline-none focus:border-secondary"
-                                            placeholder="Subtask title"
-                                            value={newSubtaskTitle}
-                                            onChange={e => setNewSubtaskTitle(e.target.value)}
-                                        />
-                                        <button type="submit" className="bg-primary text-white text-xs px-2 rounded">Add</button>
-                                    </form>
-                                )}
-
-                                <div className="space-y-1">
-                                    {tasks.filter(t => t.parent_task_id === activeTask.id).map(sub => (
-                                        <div key={sub.id} className="flex items-center justify-between p-2 border rounded hover:bg-slate-50 group">
-                                            <div className="flex items-center gap-2">
-                                                <input
-                                                    type="checkbox"
-                                                    className="accent-secondary rounded-sm cursor-pointer"
-                                                    checked={sub.status === 'Done'}
-                                                    onChange={(e) => handleUpdateTask(sub, { status: e.target.checked ? 'Done' : 'To Do' })}
-                                                />
-                                                <span className={`text-xs font-medium text-primary ${sub.status === 'Done' ? 'line-through opacity-60' : ''}`}>{sub.title}</span>
-                                            </div>
-                                            <button onClick={() => handleDeleteTask(sub.id, true)} className="text-on-surface-variant hover:text-error opacity-0 group-hover:opacity-100">
-                                                <span className="material-symbols-outlined text-[14px]">close</span>
-                                            </button>
-                                        </div>
-                                    ))}
-                                    {tasks.filter(t => t.parent_task_id === activeTask.id).length === 0 && (
-                                        <p className="text-xs text-on-surface-variant italic">No subtasks.</p>
+                                    {showSubtaskForm && (
+                                        <form onSubmit={handleCreateSubtask} className="mb-3 flex gap-2">
+                                            <input
+                                                autoFocus type="text"
+                                                className="flex-1 border rounded px-2.5 py-1 text-xs outline-none focus:border-secondary"
+                                                placeholder="Subtask title (e.g. Get logo)"
+                                                value={newSubtaskTitle}
+                                                onChange={e => setNewSubtaskTitle(e.target.value)}
+                                            />
+                                            <button type="submit" className="bg-primary text-white text-xs px-3 rounded font-medium">Add</button>
+                                            <button type="button" onClick={() => setShowSubtaskForm(false)} className="btn btn-outline text-xs px-2 rounded">Cancel</button>
+                                        </form>
                                     )}
+
+                                    <div className="space-y-1">
+                                        {tasks.filter(t => t.parent_task_id === activeTask.id).map(sub => {
+                                            const isSubDone = sub.status === 'Done' || sub.status === 'completed';
+                                            return (
+                                                <div key={sub.id} className="flex items-center justify-between p-2 border rounded-lg hover:bg-slate-50 group">
+                                                    <div className="flex items-center gap-2">
+                                                        <input
+                                                            type="checkbox"
+                                                            className="accent-secondary rounded-sm cursor-pointer"
+                                                            checked={isSubDone}
+                                                            onChange={(e) => handleUpdateTask(sub, { status: e.target.checked ? 'Done' : 'To Do' })}
+                                                        />
+                                                        <span className={`text-xs font-medium text-primary ${isSubDone ? 'line-through opacity-60' : ''}`}>
+                                                            {sub.title}
+                                                        </span>
+                                                    </div>
+                                                    <button onClick={() => handleDeleteTask(sub.id, true)} className="text-on-surface-variant hover:text-error opacity-0 group-hover:opacity-100 p-0.5" title="Delete subtask">
+                                                        <span className="material-symbols-outlined text-[14px]">close</span>
+                                                    </button>
+                                                </div>
+                                            );
+                                        })}
+                                        {tasks.filter(t => t.parent_task_id === activeTask.id).length === 0 && (
+                                            <p className="text-xs text-on-surface-variant italic">No subtasks yet. Add subtasks to break down this task.</p>
+                                        )}
+                                    </div>
                                 </div>
-                            </div>
+                            )}
 
                             {/* People */}
                             <div>

@@ -13,7 +13,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import Job, Person, User
+from models import Job, Person, User, JobPerson
 from routers.auth import current_user, get_current_user_ws
 from schemas import CalendarEventCreate, JobCreate, PaymentCreate, PersonCreate
 
@@ -24,12 +24,13 @@ SUMMARY_MODEL = "gemini-3.5-flash-lite"
 
 class MarcusFinalResult(BaseModel):
     # Flat fixed fields keep this compatible with the existing Live summary pattern.
-    intent: Literal["create_person", "create_job", "create_calendar_event", "create_payment", "unknown"]
+    intent: Literal["create_person", "create_job", "create_calendar_event", "create_payment", "create_task", "create_email", "unknown"]
     full_name: str | None = None; type: str | None = None; email: str | None = None; phone: str | None = None
     company: str | None = None; location: str | None = None; tags: list[str] = Field(default_factory=list); notes: str | None = None
     title: str | None = None; objective: str | None = None; description: str | None = None; deadline: str | None = None; budget: float | None = None
     client: str | None = None; person: str | None = None; job: str | None = None; event_type: str | None = None
     start_at: str | None = None; end_at: str | None = None; amount: float | None = None; currency: str | None = None; due_at: str | None = None
+    status: str | None = None; subtasks: list[str] = Field(default_factory=list); subject: str | None = None; body: str | None = None
 
 
 class FinalizeRequest(BaseModel):
@@ -42,10 +43,25 @@ def _client() -> genai.Client:
     return genai.Client(api_key=key)
 
 
-def _live_prompt(user: User) -> str:
-    return f"""You are Makus, Ergon's owner-facing AI assistant. The OWNER is talking directly to you. Have a natural voice conversation to prepare exactly one action. Ask one concise question at a time. Clarify ambiguity. Never say an action has been created, and never ask for final confirmation: Ergon displays a review card after the call.
+def _format_context(db: Session, user: User) -> str:
+    people = db.scalars(select(Person).where(Person.user_id == user.id)).all()
+    jobs = db.scalars(select(Job).where(Job.user_id == user.id)).all()
+    people_str = ", ".join([f"{p.name}" + (f" ({p.company})" if p.company else "") + (f" <{p.email}>" if p.email else " [no email on file]") for p in people]) or "None"
+    jobs_str = ", ".join([j.title for j in jobs]) or "None"
+    return f"""EXISTING PEOPLE IN ERGON:
+{people_str}
+
+EXISTING JOBS IN ERGON:
+{jobs_str}"""
+
+
+def _live_prompt(user: User, db: Session) -> str:
+    context = _format_context(db, user)
+    return f"""You are Marcus, Ergon's owner-facing AI assistant. The OWNER is talking directly to you. Have a natural voice conversation to prepare exactly one action. Ask one concise question at a time. Clarify ambiguity. Never say an action has been created, and never ask for final confirmation: Ergon displays a review card after the call.
 
 Today is {datetime.now().date().isoformat()}; owner timezone is {user.timezone or 'Asia/Kolkata'}.
+
+{context}
 
 You MUST collect all REQUIRED fields for the chosen intent. If a REQUIRED field is missing, you MUST ask the owner for it during the current conversation. DO NOT invite the owner to end the conversation until ALL REQUIRED fields are gathered. Do not ask for OPTIONAL fields unnecessarily.
 When ALL REQUIRED fields are collected, say the details are ready for review and invite the owner to end the conversation. Do not output JSON.
@@ -66,7 +82,28 @@ OPTIONAL: event type, person, job, description, end time
 4. CREATE PAYMENT
 REQUIRED: amount, currency, title, description, due date, person
 OPTIONAL: job
-(Payment always requires explicit final confirmation in the review screen.)"""
+(Payment always requires explicit final confirmation in the review screen.)
+
+5. CREATE TASK
+REQUIRED: title
+OPTIONAL: job, person, due date, description, subtasks
+Examples:
+- "Add a task to get Acme's logo by tomorrow." -> title: "Get Acme's logo", job: matched to Acme Website, due date: tomorrow.
+- "Create a task called Build homepage and add subtasks for header, hero section and footer." -> title: "Build homepage", subtasks: ["header", "hero section", "footer"].
+Once the owner specifies the task and whatever details they provided, inform them the task is ready for review.
+
+6. CREATE EMAIL
+REQUIRED: person, subject, body
+OPTIONAL: job
+The owner will make natural requests such as:
+- "Email Rahul and tell him we're ready to start."
+- "Marcus, write an email to Rahul from Acme telling him we're ready to start the website."
+- "Write an email to Acme asking for their requirements."
+- "Send Sarah a follow-up saying we'll call her tomorrow."
+Identify the intended recipient from the EXISTING PEOPLE list. Use their existing email address. If the person has no email address on file, do NOT invent one; the review card will ask the owner to enter one.
+Understand what the owner wants to communicate and generate a professional email subject and body.
+Confirm that the email has been prepared and is ready for review.
+(Email always requires explicit final confirmation by the owner before sending. Never send automatically.)"""
 
 
 # Same browser microphone → Gemini Live → receiver loop used by the existing
@@ -81,7 +118,7 @@ async def live_endpoint(websocket: WebSocket, db: Session = Depends(get_db)):
         await websocket.close(code=1008); return
     await websocket.accept()
     try:
-        config = {"response_modalities": ["AUDIO"], "input_audio_transcription": {}, "output_audio_transcription": {}, "system_instruction": _live_prompt(user)}
+        config = {"response_modalities": ["AUDIO"], "input_audio_transcription": {}, "output_audio_transcription": {}, "system_instruction": _live_prompt(user, db)}
         async with _client().aio.live.connect(model=LIVE_MODEL, config=config) as session:
             async def receive_from_owner():
                 try:
@@ -123,15 +160,54 @@ async def live_endpoint(websocket: WebSocket, db: Session = Depends(get_db)):
 
 def _find(db: Session, model, user_id: str, reference: str | None, field):
     if not reference: return None, False
-    exact = db.scalars(select(model).where(model.user_id == user_id, field.ilike(reference))).all()
-    matches = exact or db.scalars(select(model).where(model.user_id == user_id, field.ilike(f"%{reference}%"))).all()
+    ref = reference.strip()
+    exact = db.scalars(select(model).where(model.user_id == user_id, field.ilike(ref))).all()
+    if len(exact) == 1:
+        return exact[0], False
+    matches = db.scalars(select(model).where(model.user_id == user_id, field.ilike(f"%{ref}%"))).all()
+    if len(matches) == 1:
+        return matches[0], False
+    # Check words
+    words = [w for w in ref.split() if len(w) > 2 and w.lower() not in ("website", "project", "task", "job", "email")]
+    for w in words:
+        w_matches = db.scalars(select(model).where(model.user_id == user_id, field.ilike(f"%{w}%"))).all()
+        if len(w_matches) == 1:
+            return w_matches[0], False
     return (matches[0], False) if len(matches) == 1 else (None, len(matches) > 1)
 
 
 def _find_person(db: Session, user_id: str, reference: str | None):
     if not reference: return None, False
-    exact = db.scalars(select(Person).where(Person.user_id == user_id, or_(Person.name.ilike(reference), Person.company.ilike(reference)))).all()
-    matches = exact or db.scalars(select(Person).where(Person.user_id == user_id, or_(Person.name.ilike(f"%{reference}%"), Person.company.ilike(f"%{reference}%")))).all()
+    ref = reference.strip()
+    # 1. Exact match
+    exact = db.scalars(select(Person).where(Person.user_id == user_id, or_(Person.name.ilike(ref), Person.company.ilike(ref)))).all()
+    if len(exact) == 1:
+        return exact[0], False
+    # 2. Substring match
+    matches = db.scalars(select(Person).where(Person.user_id == user_id, or_(Person.name.ilike(f"%{ref}%"), Person.company.ilike(f"%{ref}%")))).all()
+    if len(matches) == 1:
+        return matches[0], False
+    # 3. Handle phrases like "Rahul from Acme", "Rahul at Acme"
+    for sep in (" from ", " at ", " of "):
+        if sep in ref.lower():
+            name_part, comp_part = ref.lower().split(sep, 1)
+            name_part, comp_part = name_part.strip(), comp_part.strip()
+            combo = db.scalars(select(Person).where(
+                Person.user_id == user_id,
+                Person.name.ilike(f"%{name_part}%"),
+                Person.company.ilike(f"%{comp_part}%")
+            )).all()
+            if len(combo) == 1:
+                return combo[0], False
+            name_match = db.scalars(select(Person).where(Person.user_id == user_id, Person.name.ilike(f"%{name_part}%"))).all()
+            if len(name_match) == 1:
+                return name_match[0], False
+    # 4. First name / word match
+    words = [w for w in ref.split() if len(w) > 2 and w.lower() not in ("from", "with", "email", "send")]
+    for w in words:
+        w_matches = db.scalars(select(Person).where(Person.user_id == user_id, Person.name.ilike(f"%{w}%"))).all()
+        if len(w_matches) == 1:
+            return w_matches[0], False
     return (matches[0], False) if len(matches) == 1 else (None, len(matches) > 1)
 
 
@@ -168,14 +244,113 @@ def _review(result: MarcusFinalResult, db: Session, user: User) -> dict:
         if p.get("job"):
             job, ambiguous = _find(db, Job, user.id, p["job"], Job.title)
             if job: params.update({"job_id": job.id, "job_title": job.title})
-    return {"intent": result.intent, "parameters": params, "missing_fields": [], "ready_for_review": True}
+    elif result.intent == "create_task":
+        params = {
+            "title": p.get("title") or "",
+            "description": p.get("description") or "",
+            "status": p.get("status") or "To Do",
+            "due_date": p.get("due_at") or "",
+            "person_id": "",
+            "person_name": "",
+            "job_id": "",
+            "job_title": "",
+            "subtasks": p.get("subtasks") or []
+        }
+        for kind, ref in (("person", p.get("person")), ("job", p.get("job"))):
+            if ref:
+                item, ambiguous = _find_person(db, user.id, ref) if kind == "person" else _find(db, Job, user.id, ref, Job.title)
+                if item:
+                    params[f"{kind}_id"] = item.id
+                    params[f"{kind}_name" if kind == "person" else "job_title"] = item.name if kind == "person" else item.title
+        # If job_id not resolved yet, check if person is assigned to a job or if user has only 1 job
+        if not params.get("job_id"):
+            if params.get("person_id"):
+                jp = db.scalars(select(JobPerson).where(JobPerson.person_id == params["person_id"])).first()
+                if jp:
+                    job = db.get(Job, jp.job_id)
+                    if job and job.user_id == user.id:
+                        params["job_id"] = job.id
+                        params["job_title"] = job.title
+            else:
+                user_jobs = db.scalars(select(Job).where(Job.user_id == user.id)).all()
+                if len(user_jobs) == 1:
+                    params["job_id"] = user_jobs[0].id
+                    params["job_title"] = user_jobs[0].title
+    elif result.intent == "create_email":
+        params = {
+            "subject": p.get("subject") or "",
+            "body": p.get("body") or "",
+            "email": p.get("email") or "",
+            "person_id": "",
+            "person_name": "",
+            "job_id": "",
+            "job_title": ""
+        }
+        ref = p.get("person")
+        if ref:
+            person, ambiguous = _find_person(db, user.id, ref)
+            if person:
+                params.update({
+                    "person_id": person.id,
+                    "person_name": person.name,
+                    # If person has no email, do not invent one
+                    "email": person.email or ""
+                })
+                jp = db.scalars(select(JobPerson).where(JobPerson.person_id == person.id)).first()
+                if jp and not p.get("job"):
+                    job = db.get(Job, jp.job_id)
+                    if job and job.user_id == user.id:
+                        params["job_id"] = job.id
+                        params["job_title"] = job.title
+        if p.get("job"):
+            job, ambiguous = _find(db, Job, user.id, p["job"], Job.title)
+            if job:
+                params.update({"job_id": job.id, "job_title": job.title})
+        elif not params.get("job_id"):
+            user_jobs = db.scalars(select(Job).where(Job.user_id == user.id)).all()
+            if len(user_jobs) == 1:
+                params["job_id"] = user_jobs[0].id
+                params["job_title"] = user_jobs[0].title
+    missing = []
+    if result.intent == "create_email":
+        if not params.get("email"):
+            missing.append("email")
+    elif result.intent == "create_task":
+        if not params.get("title"):
+            missing.append("title")
+    elif result.intent == "create_person":
+        if not params.get("name"):
+            missing.append("name")
+    elif result.intent == "create_job":
+        if not params.get("title"):
+            missing.append("title")
+
+    return {"intent": result.intent, "parameters": params, "missing_fields": missing, "ready_for_review": True}
 
 
 @router.post("/finalize")
 def finalize(data: FinalizeRequest, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    prompt = f"""Extract one Ergon owner action from this completed Makus conversation. Use only facts supplied by OWNER; do not invent. Return unknown if no supported action is clear. Person: full_name,type,email,phone,company,location,tags,notes. Job: title,objective,description,deadline,budget,client/person. Calendar: title,event_type,start_at,end_at,description,person/job. Payment: title,amount,currency,description,due_at,client/person/job. Dates must be ISO 8601 only if sufficiently specified. Leave unavailable optional fields null and tags empty. Do not include IDs or keys outside the fixed schema.
+    context = _format_context(db, user)
+    prompt = f"""Extract one Ergon owner action from this completed Marcus conversation. Use only facts supplied by OWNER and ERGON CONTEXT; do not invent. Return unknown if no supported action is clear.
 
-TODAY IS {datetime.now().date().isoformat()}; owner timezone is {user.timezone or 'Asia/Kolkata'}. Resolve natural language dates (e.g. "tomorrow at 4 PM") relative to this.
+{context}
+
+SCHEMA EXTRACTION RULES:
+- Person: full_name, type, email, phone, company, location, tags, notes.
+- Job: title, objective, description, deadline, budget, client/person.
+- Calendar: title, event_type, start_at, end_at, description, person/job.
+- Payment: title, amount, currency, description, due_at, client/person/job.
+- Task: title, description, due_at, status, job, person, subtasks (list of string subtask titles).
+- Email: person, email, subject, body, job.
+  * For create_email: Identify the intended recipient from the EXISTING PEOPLE list. Use their email address if listed in ERGON CONTEXT; if no email is on file, leave email null (DO NOT invent one).
+  * Generate a professional email subject and body based on the owner's request:
+    - subject: concise, professional business subject line.
+    - body: professional, politely structured business email body including greeting ("Hi [Name],"), clear paragraphs, and sign-off ("Best regards,\n{user.name}").
+  * Resolve job if mentioned or relevant.
+
+Dates must be ISO 8601 only if sufficiently specified (e.g. YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS). Leave unavailable optional fields null and tags empty. Do not include IDs or keys outside the fixed schema.
+
+TODAY IS {datetime.now().date().isoformat()}; owner timezone is {user.timezone or 'Asia/Kolkata'}. Resolve natural language dates (e.g. "tomorrow", "by tomorrow") relative to this.
 
 TRANSCRIPT:
 {data.transcript}"""
@@ -186,4 +361,5 @@ TRANSCRIPT:
         result = response.parsed if isinstance(response.parsed, MarcusFinalResult) else MarcusFinalResult.model_validate(response.parsed)
         return _review(result, db, user)
     except RuntimeError as error: raise HTTPException(503, str(error)) from error
-    except Exception as error: raise HTTPException(502, f"Makus could not finalise this conversation: {error}") from error
+    except Exception as error: raise HTTPException(502, f"Marcus could not finalise this conversation: {error}") from error
+

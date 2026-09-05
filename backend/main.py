@@ -46,6 +46,7 @@ from schemas import (
     MilestoneUpdate,
     CalendarEventCreate,
     CalendarEventUpdate,
+    EmailCreate,
 )
 
 from utils import serialize, activity, owned
@@ -655,8 +656,19 @@ def get_tasks(
     db: Session = Depends(get_db),
 ):
     owned(db, Job, job_id, user.id)
-    tasks = db.scalars(select(Task).where(Task.job_id == job_id).order_by(Task.created_at.desc())).all()
-    return [serialize(t) for t in tasks]
+    tasks = db.scalars(select(Task).where(Task.job_id == job_id).order_by(Task.created_at.asc())).all()
+    results = []
+    for t in tasks:
+        td = serialize(t)
+        task_links = db.scalars(select(TaskPerson).where(TaskPerson.task_id == t.id)).all()
+        td["people"] = []
+        for tl in task_links:
+            try:
+                td["people"].append(serialize(owned(db, Person, tl.person_id, user.id)))
+            except Exception:
+                pass
+        results.append(td)
+    return results
 
 @app.post("/jobs/{job_id}/tasks", status_code=201)
 def create_task(
@@ -668,16 +680,29 @@ def create_task(
     owned(db, Job, job_id, user.id)
     payload = data.model_dump()
     person_ids = payload.pop("person_ids", [])
+    subtasks = payload.pop("subtasks", [])
     task = Task(job_id=job_id, **payload)
     db.add(task)
     db.flush()
     for pid in person_ids:
-        db.add(TaskPerson(task_id=task.id, person_id=pid))
+        if pid:
+            db.add(TaskPerson(task_id=task.id, person_id=pid))
+    for st_title in subtasks:
+        if isinstance(st_title, str) and st_title.strip():
+            db.add(Task(job_id=job_id, title=st_title.strip(), status="To Do", parent_task_id=task.id))
     
     activity(db, user.id, "TASK_CREATED", f"Task created - {task.title}", job_id=job_id)
     db.commit()
     db.refresh(task)
-    return serialize(task)
+    td = serialize(task)
+    task_links = db.scalars(select(TaskPerson).where(TaskPerson.task_id == task.id)).all()
+    td["people"] = []
+    for tl in task_links:
+        try:
+            td["people"].append(serialize(owned(db, Person, tl.person_id, user.id)))
+        except Exception:
+            pass
+    return td
 
 @app.patch("/tasks/{task_id}")
 def update_task(
@@ -700,12 +725,21 @@ def update_task(
     if person_ids is not None:
         db.query(TaskPerson).filter(TaskPerson.task_id == task_id).delete()
         for pid in person_ids:
-            db.add(TaskPerson(task_id=task.id, person_id=pid))
+            if pid:
+                db.add(TaskPerson(task_id=task.id, person_id=pid))
     
     activity(db, user.id, "TASK_UPDATED", f"Task updated - {task.title}", job_id=task.job_id)
     db.commit()
     db.refresh(task)
-    return serialize(task)
+    td = serialize(task)
+    task_links = db.scalars(select(TaskPerson).where(TaskPerson.task_id == task.id)).all()
+    td["people"] = []
+    for tl in task_links:
+        try:
+            td["people"].append(serialize(owned(db, Person, tl.person_id, user.id)))
+        except Exception:
+            pass
+    return td
 
 @app.delete("/tasks/{task_id}", status_code=204)
 def delete_task(
@@ -718,6 +752,12 @@ def delete_task(
         raise HTTPException(status_code=404, detail="Task not found")
     owned(db, Job, task.job_id, user.id)
     
+    # Delete child subtasks first to satisfy foreign key constraints
+    subtasks = db.scalars(select(Task).where(Task.parent_task_id == task_id)).all()
+    for st in subtasks:
+        db.query(TaskPerson).filter(TaskPerson.task_id == st.id).delete()
+        db.delete(st)
+
     # delete task_people as well (cascade or manual)
     db.query(TaskPerson).filter(TaskPerson.task_id == task_id).delete()
     db.delete(task)
@@ -768,6 +808,37 @@ def delete_milestone(
     owned(db, Job, milestone.job_id, user.id)
     db.delete(milestone)
     db.commit()
+
+@app.post("/emails/send")
+def send_email(
+    data: EmailCreate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    if data.person_id:
+        owned(db, Person, data.person_id, user.id)
+    if data.job_id:
+        owned(db, Job, data.job_id, user.id)
+
+    # Send email via SMTP
+    from services.email_service import send_smtp_email
+    try:
+        send_smtp_email(to_email=data.email, subject=data.subject, body=data.body, from_email=user.email)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to send email via SMTP: {str(e)}")
+    
+    activity(
+        db, 
+        user.id, 
+        "EMAIL_SENT", 
+        f"Email sent to {data.email}: {data.subject}",
+        description=data.body,
+        person_id=data.person_id,
+        job_id=data.job_id
+    )
+    
+    db.commit()
+    return {"status": "success", "message": "Email sent."}
 
 
 # ============================================================

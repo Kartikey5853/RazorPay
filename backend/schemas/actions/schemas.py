@@ -7,3 +7,4 @@ class PaymentCreate(BaseModel): title: str; amount: float; person_id: str | None
 class PaymentUpdate(BaseModel): title: str | None = None; amount: float | None = None; person_id: str | None = None; job_id: str | None = None; currency: str | None = None; description: str | None = None; due_at: datetime | None = None; status: str | None = None
 class ProcessRequest(BaseModel): call_id: str | None = None; conversation_id: str | None = None; transcript: str | None = None
 class PaymentVerifyRequest(BaseModel): razorpay_payment_id: str; razorpay_order_id: str; razorpay_signature: str
+class EmailCreate(BaseModel): subject: str; body: str; email: str; person_id: str | None = None; job_id: str | None = None
